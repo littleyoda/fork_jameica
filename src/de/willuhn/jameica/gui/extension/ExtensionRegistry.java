@@ -12,6 +12,7 @@ package de.willuhn.jameica.gui.extension;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -28,6 +29,7 @@ public class ExtensionRegistry
 {
 
   private static Map<String,List<Extension>> extensions = new HashMap<String,List<Extension>>();
+  private static Map<Extension,String> sources = new IdentityHashMap<Extension,String>();
   
   /**
    * Erweitert das Extendable insofern Extensions registriert sind.
@@ -70,7 +72,20 @@ public class ExtensionRegistry
    */
   public static void register(Extension extension, String[] extendableIDs)
   {
-      
+    register(extension,extendableIDs,null);
+  }
+
+  /**
+   * Registriert das Erweiterungsmodul unter den genannten IDs.
+   * @param extension
+   * @param extendableIDs
+   * @param source Name des Plugins, aus dem die Extension stammt.
+   */
+  public static void register(Extension extension, String[] extendableIDs, String source)
+  {
+    if (extension != null && source != null)
+      sources.put(extension,source);
+
     for (int i=0;i<extendableIDs.length;++i)
     {
       List<Extension> v = extensions.get(extendableIDs[i]);
@@ -90,6 +105,16 @@ public class ExtensionRegistry
   public static void register(Extension extension, String extendableID)
   {
     register(extension, new String[]{extendableID});
+  }
+
+  /**
+   * Liefert den Namen des Plugins, aus dem die Extension stammt.
+   * @param extension Extension.
+   * @return Plugin-Name oder NULL.
+   */
+  public static String getSource(Extension extension)
+  {
+    return extension == null ? null : sources.get(extension);
   }
 
   /**

@@ -10,8 +10,14 @@
 package de.willuhn.jameica.gui;
 
 import java.rmi.RemoteException;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import org.eclipse.swt.SWT;
 import org.eclipse.swt.events.DisposeEvent;
@@ -30,9 +36,11 @@ import org.eclipse.swt.widgets.TreeItem;
 import org.eclipse.swt.widgets.Widget;
 
 import de.willuhn.datasource.GenericIterator;
+import de.willuhn.jameica.gui.extension.Extension;
 import de.willuhn.jameica.gui.extension.ExtensionRegistry;
 import de.willuhn.jameica.gui.util.Color;
 import de.willuhn.jameica.gui.util.Font;
+import de.willuhn.jameica.messaging.MessageBus;
 import de.willuhn.jameica.messaging.StatusBarMessage;
 import de.willuhn.jameica.services.SystrayService;
 import de.willuhn.jameica.system.Application;
@@ -57,11 +65,15 @@ public class Navigation implements Part
   private Listener start        = new MyStartListener();
   private Settings settings     = new Settings(Navigation.class);
   private Tree mainTree					= null;
+  private NavigationItem contextItem = null;
   
 	// TreeItem, unterhalb dessen die Plugins eingehaengt werden. 
   private TreeItem pluginTree		= null;
   
   private Map<String,TreeItem> itemLookup  = new HashMap<String,TreeItem>();
+  private Map<String,String> pluginLookup  = new HashMap<String,String>();
+  private Map<String,NavigationItem> navigationLookup = new LinkedHashMap<String,NavigationItem>();
+  private Map<NavigationItem,String> navigationSource = new IdentityHashMap<NavigationItem,String>();
   
   /**
    * @see de.willuhn.jameica.gui.Part#paint(org.eclipse.swt.widgets.Composite)
@@ -91,6 +103,14 @@ public class Navigation implements Part
     this.mainTree.addListener(SWT.Collapse,         action); // Icon ersetzen
     this.mainTree.addListener(SWT.MouseUp,          action); // Single-Klick zum View starten
     this.mainTree.addListener(SWT.DefaultSelection, action); // Fuer Enter und Doppelklick
+    this.mainTree.addListener(SWT.MenuDetect, new Listener() {
+      public void handleEvent(Event event)
+      {
+        TreeItem item = mainTree.getItem(mainTree.toControl(event.x,event.y));
+        contextItem = item != null ? (NavigationItem) item.getData(KEY_NAVIGATION) : null;
+      }
+    });
+    createContextMenu();
     
     // Globaler Listener, um der Navi mittels ALT+N den Fokus zu geben
     GUI.getDisplay().addFilter(SWT.KeyUp, new Listener() {
@@ -131,7 +151,7 @@ public class Navigation implements Part
       try
       {
         // System-Navigation laden
-        load(Application.getManifest().getNavigation(),null);
+        load(Application.getManifest().getNavigation(),null,"Jameica");
       }
       catch (Exception e)
       {
@@ -141,12 +161,64 @@ public class Navigation implements Part
   }
 
   /**
+   * Erzeugt das Kontextmenu der Navigation.
+   */
+  private void createContextMenu()
+  {
+    final org.eclipse.swt.widgets.Menu menu = new org.eclipse.swt.widgets.Menu(this.mainTree);
+    this.mainTree.setMenu(menu);
+
+    final org.eclipse.swt.widgets.MenuItem add = new org.eclipse.swt.widgets.MenuItem(menu,SWT.PUSH);
+    add.setText(Application.getI18n().tr("Zur Symbolleiste hinzuf\u00fcgen"));
+    add.setImage(de.willuhn.jameica.gui.util.SWTUtil.getImage("list-add.png"));
+    add.addListener(SWT.Selection,new Listener()
+    {
+      public void handleEvent(Event event)
+      {
+        if (contextItem == null)
+          return;
+
+        try
+        {
+          IconBarSettings.add(new IconBarEntry(IconBarEntry.TYPE_NAVIGATION,contextItem.getID(),contextItem.getName(),null));
+          IconBarSettings.setVisible(true);
+          if (GUI.getIconBar() != null)
+            GUI.getIconBar().redraw();
+          Application.getMessagingFactory().sendMessage(new StatusBarMessage(Application.getI18n().tr("Eintrag zur Symbolleiste hinzugef\u00fcgt"),StatusBarMessage.TYPE_SUCCESS));
+        }
+        catch (Exception e)
+        {
+          Logger.error("unable to add navigation item to icon bar",e);
+          Application.getMessagingFactory().sendMessage(new StatusBarMessage(Application.getI18n().tr("Fehler beim Hinzuf\u00fcgen zur Symbolleiste"),StatusBarMessage.TYPE_ERROR));
+        }
+      }
+    });
+
+    menu.addListener(SWT.Show,new Listener()
+    {
+      public void handleEvent(Event event)
+      {
+        boolean enabled = false;
+        try
+        {
+          enabled = contextItem != null && contextItem.getAction() != null && contextItem.isEnabled() && !IconBarSettings.contains(IconBarEntry.TYPE_NAVIGATION,contextItem.getID());
+        }
+        catch (Exception e)
+        {
+          Logger.error("unable to update navigation context menu",e);
+        }
+        add.setEnabled(enabled);
+      }
+    });
+  }
+
+  /**
 	 * Laedt das Navigation-Item und dessen Kinder.
    * @param element das zu ladende Item.
    * @param parentTree uebergeordnetes SWT-Element.
    * @throws RemoteException
    */
-  private void load(NavigationItem element, TreeItem parentTree) throws RemoteException
+  private void load(NavigationItem element, TreeItem parentTree, String plugin) throws RemoteException
 	{
 		if (element == null)
 			return;
@@ -155,7 +227,7 @@ public class Navigation implements Part
 		
 		if (name == null)
 		{
-			loadChildren(element,parentTree);
+			loadChildren(element,parentTree,plugin);
 			return;
 		}
 
@@ -186,13 +258,14 @@ public class Navigation implements Part
     }
     
     this.itemLookup.put(element.getID(),item);
+    register(element,plugin);
 
     // Bevor wir die Kinder laden, geben wir das Element noch der
     // ExtensionRegistry fuer eventuell weitere Erweiterungen
-    ExtensionRegistry.extend(element);
+    extend(element);
 
 		// und laden nun unsere Kinder
-		loadChildren(element,item);
+		loadChildren(element,item,plugin);
 	}
 
   /**
@@ -246,16 +319,123 @@ public class Navigation implements Part
    * @param parentTree Parent.
 	 * @throws RemoteException
    */
-  private void loadChildren(NavigationItem element, TreeItem parentTree) throws RemoteException
+  private void loadChildren(NavigationItem element, TreeItem parentTree, String plugin) throws RemoteException
 	{
 		GenericIterator<?> childs = element.getChildren();
 		if (childs == null || childs.size() == 0)
 			return;
 		while (childs.hasNext())
 		{
-			load((NavigationItem) childs.next(),parentTree);
+      NavigationItem child = (NavigationItem) childs.next();
+      String childPlugin = this.navigationSource.get(child);
+			load(child,parentTree,childPlugin != null ? childPlugin : plugin);
 		}
 	}
+
+  /**
+   * Erweitert ein Navigation-Item und merkt sich die Herkunft neu hinzugefuegter Kinder.
+   * @param element Navigation-Item.
+   */
+  private void extend(NavigationItem element)
+  {
+    if (element == null)
+      return;
+
+    String id = element.getExtendableID();
+    if (id == null)
+      return;
+
+    int count = 0;
+    List<Extension> extensions = ExtensionRegistry.getExtensions(id);
+    if (extensions != null)
+    {
+      for (Extension extension:extensions)
+      {
+        try
+        {
+          Set<NavigationItem> before = Collections.newSetFromMap(new IdentityHashMap<NavigationItem,Boolean>());
+          before.addAll(children(element));
+          extension.extend(element);
+          count++;
+          rememberNewChildren(element,before,ExtensionRegistry.getSource(extension));
+        }
+        catch (Throwable t)
+        {
+          Logger.error("error while extending " + id,t);
+        }
+      }
+    }
+    MessageBus.sendSync(id,count);
+  }
+
+  /**
+   * Merkt sich die Herkunft neu hinzugefuegter Kinder.
+   * @param parent Eltern-Item.
+   * @param before Kinder vor der Erweiterung.
+   * @param plugin Plugin-Name.
+   * @throws RemoteException
+   */
+  private void rememberNewChildren(NavigationItem parent, Set<NavigationItem> before, String plugin) throws RemoteException
+  {
+    if (plugin == null)
+      return;
+
+    for (NavigationItem child:children(parent))
+    {
+      if (!before.contains(child))
+        rememberSource(child,plugin);
+    }
+  }
+
+  /**
+   * Merkt sich die Herkunft eines Navigation-Items und seiner Kinder.
+   * @param item Navigation-Item.
+   * @param plugin Plugin-Name.
+   * @throws RemoteException
+   */
+  private void rememberSource(NavigationItem item, String plugin) throws RemoteException
+  {
+    if (item == null || plugin == null)
+      return;
+
+    this.navigationSource.put(item,plugin);
+    for (NavigationItem child:children(item))
+      rememberSource(child,plugin);
+  }
+
+  /**
+   * Liefert die Kinder eines Navigation-Items als Liste.
+   * @param item Navigation-Item.
+   * @return Kinder.
+   * @throws RemoteException
+   */
+  private List<NavigationItem> children(NavigationItem item) throws RemoteException
+  {
+    List<NavigationItem> result = new ArrayList<NavigationItem>();
+    GenericIterator<?> children = item.getChildren();
+    while (children != null && children.hasNext())
+      result.add((NavigationItem) children.next());
+    return result;
+  }
+
+  /**
+   * Merkt sich ein Navigation-Item unabhaengig vom sichtbaren TreeItem.
+   * @param element Navigation-Item.
+   * @param plugin Name des Plugins.
+   * @throws RemoteException
+   */
+  private void register(NavigationItem element, String plugin) throws RemoteException
+  {
+    if (element == null)
+      return;
+
+    String id = element.getID();
+    if (id == null)
+      return;
+
+    this.navigationLookup.put(id,element);
+    this.pluginLookup.put(id,plugin);
+  }
 
   /**
 	 * Fuegt einen weiteren Navigationszweig hinzu.
@@ -264,9 +444,20 @@ public class Navigation implements Part
    */
   protected void add(NavigationItem navi) throws Exception
 	{
+    add(navi,null);
+	}
+
+  /**
+   * Fuegt einen weiteren Navigationszweig hinzu.
+   * @param navi das hinzuzufuegende Navigations-Element.
+   * @param plugin Name des Plugins.
+   * @throws Exception
+   */
+  protected void add(NavigationItem navi, String plugin) throws Exception
+	{
 		if (navi == null)
 			return;
-		load(navi,this.pluginTree);
+		load(navi,this.pluginTree,plugin);
 	}
   
   /**
@@ -285,14 +476,69 @@ public class Navigation implements Part
     if (ti == null || ti.isDisposed())
       return;
     
+    NavigationItem current = this.navigationLookup.get(item.getID());
+    if (current != null && current != item)
+      unregisterChildren(current);
+
     //Existierende Childs entfernen
     for (TreeItem i : ti.getItems())
     {
+      unregister((NavigationItem) i.getData(KEY_NAVIGATION));
       i.dispose();
     }
     
     //Childs neu laden
-    loadChildren(item,ti);
+    loadChildren(item,ti,this.pluginLookup.get(item.getID()));
+  }
+
+  /**
+   * Entfernt die Kinder eines Navigation-Items aus dem Katalog.
+   * @param item Navigation-Item.
+   */
+  private void unregisterChildren(NavigationItem item)
+  {
+    if (item == null)
+      return;
+
+    try
+    {
+      GenericIterator<?> children = item.getChildren();
+      while (children != null && children.hasNext())
+        unregister((NavigationItem) children.next());
+    }
+    catch (Exception e)
+    {
+      Logger.error("unable to unregister navigation item children",e);
+    }
+  }
+
+  /**
+   * Entfernt ein Navigation-Item und dessen Kinder aus dem Katalog.
+   * @param item Navigation-Item.
+   */
+  private void unregister(NavigationItem item)
+  {
+    if (item == null)
+      return;
+
+    try
+    {
+      String id = item.getID();
+      if (id != null)
+      {
+        this.navigationLookup.remove(id);
+        this.pluginLookup.remove(id);
+        this.navigationSource.remove(item);
+      }
+
+      GenericIterator<?> children = item.getChildren();
+      while (children != null && children.hasNext())
+        unregister((NavigationItem) children.next());
+    }
+    catch (Exception e)
+    {
+      Logger.error("unable to unregister navigation item",e);
+    }
   }
 
   /**
@@ -305,6 +551,10 @@ public class Navigation implements Part
     if (item == null)
       return;
 
+    String id = item.getID();
+    if (id != null && this.navigationLookup.containsKey(id))
+      this.navigationLookup.put(id,item);
+
     TreeItem ti = this.itemLookup.get(item.getID());
     if (ti == null || ti.isDisposed())
       return;
@@ -313,6 +563,65 @@ public class Navigation implements Part
     ti.setForeground(item.isEnabled() ? Color.FOREGROUND.getSWTColor() : Color.COMMENT.getSWTColor());
     ti.setText(item.getName());
     ti.setData(KEY_NAVIGATION,item);
+  }
+
+  /**
+   * Liefert ein Navigation-Item anhand seiner ID.
+   * @param id ID.
+   * @return Navigation-Item oder NULL.
+   */
+  public NavigationItem getItem(String id)
+  {
+    if (id == null)
+      return null;
+
+    NavigationItem item = this.navigationLookup.get(id);
+    if (item != null)
+      return item;
+
+    TreeItem ti = this.itemLookup.get(id);
+    if (ti == null || ti.isDisposed())
+      return null;
+
+    return (NavigationItem) ti.getData(KEY_NAVIGATION);
+  }
+
+  /**
+   * Liefert alle ausfuehrbaren Navigationseintraege.
+   * @return Eintraege fuer die Symbolleiste.
+   */
+  public java.util.List<IconBarEntry> getActionItems()
+  {
+    List<IconBarEntry> result = new ArrayList<IconBarEntry>();
+    for (NavigationItem item:this.navigationLookup.values())
+      collectActionItem(item,result);
+
+    return result;
+  }
+
+  /**
+   * Sammelt einen ausfuehrbaren Navigationseintrag.
+   * @param item Navigation-Item.
+   * @param result Ergebnisliste.
+   */
+  private void collectActionItem(NavigationItem item, List<IconBarEntry> result)
+  {
+    if (item == null)
+      return;
+
+    try
+    {
+      if (item.getAction() != null)
+      {
+        IconBarEntry entry = new IconBarEntry(IconBarEntry.TYPE_NAVIGATION,item.getID(),item.getName(),null);
+        entry.setPlugin(this.pluginLookup.get(item.getID()));
+        result.add(entry);
+      }
+    }
+    catch (Exception e)
+    {
+      Logger.error("unable to collect navigation item",e);
+    }
   }
 
   /**

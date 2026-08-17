@@ -29,6 +29,7 @@ import de.willuhn.jameica.gui.input.IntegerInput;
 import de.willuhn.jameica.gui.input.SelectInput;
 import de.willuhn.jameica.gui.input.TextInput;
 import de.willuhn.jameica.gui.internal.parts.CertificateList;
+import de.willuhn.jameica.gui.internal.parts.IconBarSettingsPart;
 import de.willuhn.jameica.gui.internal.parts.PluginDetailPart.Type;
 import de.willuhn.jameica.gui.internal.parts.PluginListPart;
 import de.willuhn.jameica.gui.parts.TablePart;
@@ -79,6 +80,7 @@ public class SettingsControl extends AbstractControl
   private CheckboxInput randomSplash;
   private CheckboxInput systray;
   private CheckboxInput minimizeToSystray;
+  private IconBarSettingsPart iconBarSettings;
 	
   /**
    * ct.
@@ -391,6 +393,18 @@ public class SettingsControl extends AbstractControl
   }
 
   /**
+   * Liefert die Einstellungen fuer die Symbolleiste.
+   * @return Einstellungen fuer die Symbolleiste.
+   */
+  public IconBarSettingsPart getIconBarSettings()
+  {
+    if (this.iconBarSettings != null)
+      return this.iconBarSettings;
+    this.iconBarSettings = new IconBarSettingsPart();
+    return this.iconBarSettings;
+  }
+
+  /**
    * Speichert die Einstellungen.
    */
   public void handleStore()
@@ -441,6 +455,7 @@ public class SettingsControl extends AbstractControl
       final SystrayService systray = Application.getBootLoader().getBootable(SystrayService.class);
       systray.setEnabled(((Boolean)getSystray().getValue()).booleanValue());
       systray.setMinimizeToSystray(((Boolean)getMinimizeToSystray().getValue()).booleanValue());
+      getIconBarSettings().apply();
       
       Application.getMessagingFactory().sendSyncMessage(new SettingsChangedMessage());
       Application.getMessagingFactory().sendMessage(new StatusBarMessage(Application.getI18n().tr("Einstellungen gespeichert."),StatusBarMessage.TYPE_SUCCESS));

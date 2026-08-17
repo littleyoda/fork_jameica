@@ -10,7 +10,9 @@
 package de.willuhn.jameica.gui;
 
 import java.rmi.RemoteException;
+import java.util.ArrayList;
 import java.util.Hashtable;
+import java.util.List;
 
 import org.eclipse.jface.bindings.keys.KeyStroke;
 import org.eclipse.jface.bindings.keys.SWTKeySupport;
@@ -43,6 +45,8 @@ public class Menu
 	private Decorations parent;
 
   private Hashtable itemLookup = new Hashtable();
+  private Hashtable idLookup = new Hashtable();
+  private Hashtable pluginLookup = new Hashtable();
   
   /**
    * Erzeugt eine neue Instanz des Dropdown-Menus.
@@ -59,7 +63,7 @@ public class Menu
   		parent.setMenuBar(mainMenu);
 
 		// System-Menu laden
-		load(Application.getManifest().getMenu(),mainMenu);
+		load(Application.getManifest().getMenu(),mainMenu,"Jameica");
   }
 
   /**
@@ -69,13 +73,24 @@ public class Menu
    */
 	protected void add(MenuItem menu) throws Exception
 	{
+    add(menu,null);
+	}
+
+  /**
+   * Fuegt weitere Sub-Menus hinzu.
+   * @param menu das hinzuzufuegende Menu.
+   * @param plugin Name des Plugins.
+   * @throws Exception
+   */
+	protected void add(MenuItem menu, String plugin) throws Exception
+	{
     if (menu == null || mainMenu == null)
       return;
     
     if (Customizing.SETTINGS.getBoolean("application.menu.hideplugins",false))
       return;
     
-    load(menu,mainMenu);
+    load(menu,mainMenu,plugin);
 	}
 
   /**
@@ -84,7 +99,7 @@ public class Menu
    * @param parentMenu
    * @throws Exception
    */
-  private void load(final MenuItem element, org.eclipse.swt.widgets.Menu parentMenu) throws Exception
+  private void load(final MenuItem element, org.eclipse.swt.widgets.Menu parentMenu, String plugin) throws Exception
   {
     if (element == null)
       return;
@@ -98,7 +113,7 @@ public class Menu
 		// Wenns keinen Namen hat, gibts nichts anzuzeigen und wir laden nur die Kinder,
 		if (name == null)
 		{
-			loadChildren(element,parentMenu);
+			loadChildren(element,parentMenu,plugin);
 			return;
 		}
 
@@ -112,6 +127,8 @@ public class Menu
     org.eclipse.swt.widgets.MenuItem item = new org.eclipse.swt.widgets.MenuItem(parentMenu,SWT.CASCADE);
 
     this.itemLookup.put(element,item);
+    this.idLookup.put(element.getID(),element);
+    this.pluginLookup.put(element.getID(),plugin);
 
     item.setData("item",element);
     item.setEnabled(element.isEnabled());
@@ -197,7 +214,7 @@ public class Menu
       // Wir laden die Kinder
       parentMenu = new org.eclipse.swt.widgets.Menu(parent,SWT.DROP_DOWN);
       item.setMenu(parentMenu);
-      loadChildren(element,parentMenu);
+      loadChildren(element,parentMenu,plugin);
       ////////////////////////////////////////////////////////////////////////////
     }
     else
@@ -213,7 +230,7 @@ public class Menu
    * @param menu Menu.
    * @throws Exception
    */
-  private void loadChildren(final MenuItem element, org.eclipse.swt.widgets.Menu menu) throws Exception
+  private void loadChildren(final MenuItem element, org.eclipse.swt.widgets.Menu menu, String plugin) throws Exception
 	{
 		// add elements
 		GenericIterator childs = element.getChildren();
@@ -221,8 +238,34 @@ public class Menu
 			return;
 		while (childs.hasNext())
 		{
-			load((MenuItem) childs.next(),menu);
+			load((MenuItem) childs.next(),menu,plugin);
 		}
+  }
+
+  /**
+   * Liefert alle ausfuehrbaren Menu-Eintraege.
+   * @return Eintraege fuer die Symbolleiste.
+   */
+  public List<IconBarEntry> getActionItems()
+  {
+    List<IconBarEntry> result = new ArrayList<IconBarEntry>();
+    for (Object current:this.idLookup.values())
+    {
+      try
+      {
+        MenuItem item = (MenuItem) current;
+        if (item.getAction() == null)
+          continue;
+        IconBarEntry entry = new IconBarEntry(IconBarEntry.TYPE_MENU,item.getID(),item.getName(),null);
+        entry.setPlugin((String) this.pluginLookup.get(item.getID()));
+        result.add(entry);
+      }
+      catch (Exception e)
+      {
+        Logger.error("unable to collect menu item",e);
+      }
+    }
+    return result;
   }
 
   /**
@@ -235,6 +278,18 @@ public class Menu
     org.eclipse.swt.widgets.MenuItem mi = (org.eclipse.swt.widgets.MenuItem) itemLookup.get(item);
     if (mi != null && !mi.isDisposed())
       mi.setEnabled(item.isEnabled());
+  }
+
+  /**
+   * Liefert ein Menu-Item anhand seiner ID.
+   * @param id ID.
+   * @return Menu-Item oder NULL.
+   */
+  public MenuItem getItem(String id)
+  {
+    if (id == null)
+      return null;
+    return (MenuItem) this.idLookup.get(id);
   }
 
 }

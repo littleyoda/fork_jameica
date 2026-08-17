@@ -131,6 +131,9 @@ public class Settings extends AbstractView implements Extendable
     lnfGroup.addInput(control.getSystray());
     lnfGroup.addInput(control.getMinimizeToSystray());
 
+    lnfGroup.addHeadline(i18n.tr("Symbolleiste"));
+    lnfGroup.addPart(control.getIconBarSettings());
+
     //
 		/////////////////////////////////////////////////////////////////
 
