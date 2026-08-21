@@ -1369,7 +1369,11 @@ public class TablePart extends AbstractTablePart
     // Und schreiben sie sortiert neu
     try
     {
-      List<?> checkedItems = getItems();
+      List<?> checkedItems = null;
+      
+      // nur ermitteln, wenn wir sie wirklich brauchen
+      if (checkable)
+        checkedItems = getItems();
 
       Item sort = null;
       for (int i=0;i<l.size();++i)
@@ -1381,10 +1385,11 @@ public class TablePart extends AbstractTablePart
         if (tableFormatter != null)
           tableFormatter.format(item);
       }
-      if (checkable)
-      {
+      
+      // Aktivierte Checkboxen wiederherstellen
+      if (checkedItems != null)
         setChecked(checkedItems.toArray(), true);
-      }
+      
     } catch (RemoteException e)
     {
       Logger.error("Fehler beim Sortieren");
