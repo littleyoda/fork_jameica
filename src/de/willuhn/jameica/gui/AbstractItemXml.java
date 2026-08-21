@@ -90,7 +90,7 @@ public abstract class AbstractItemXml implements Item
 
   	String s = path.getAttribute("action",null);
 
-  	if (s == null || s.trim().length() == 0)
+  	if (s == null || s.isBlank())
   		return null;
 
 		try
