@@ -1367,17 +1367,34 @@ public class TablePart extends AbstractTablePart
     table.removeAll();
 
     // Und schreiben sie sortiert neu
-    Item sort = null;
-    for (int i=0;i<l.size();++i)
+    try
     {
-      sort = l.get(i);
-      final TableItem item = new TableItem(table,SWT.NONE,i);
-      item.setData(sort.data);
-      item.setText(textTable.get(sort.data));
-      if (tableFormatter != null)
-        tableFormatter.format(item);
+      List<?> checkedItems = null;
+      
+      // nur ermitteln, wenn wir sie wirklich brauchen
+      if (checkable)
+        checkedItems = getItems();
+
+      Item sort = null;
+      for (int i=0;i<l.size();++i)
+      {
+        sort = l.get(i);
+        final TableItem item = new TableItem(table,SWT.NONE,i);
+        item.setData(sort.data);
+        item.setText(textTable.get(sort.data));
+        if (tableFormatter != null)
+          tableFormatter.format(item);
+      }
+      
+      // Aktivierte Checkboxen wiederherstellen
+      if (checkedItems != null)
+        setChecked(checkedItems.toArray(), true);
+      
+    } catch (RemoteException e)
+    {
+      Logger.error("Fehler beim Sortieren");
     }
-    
+
     if (selection != null)
     {
       if (selection instanceof Object[])
