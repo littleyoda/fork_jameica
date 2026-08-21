@@ -44,7 +44,7 @@ public final class IconBarSettings
    */
   public static boolean isVisible()
   {
-    return SETTINGS.getBoolean(KEY_VISIBLE,true);
+    return SETTINGS.getBoolean(KEY_VISIBLE,false);
   }
 
   /**
