@@ -132,38 +132,3 @@ public class ExtensionRegistry
   }
 
 }
-
-
-/*********************************************************************
- * $Log: ExtensionRegistry.java,v $
- * Revision 1.10  2011/10/05 10:48:55  willuhn
- * @R Messaging wieder entfernt - erzeugt haufenweise Queues, die wir im Moment noch gar nicht nutzen
- *
- * Revision 1.9  2011-09-28 12:41:29  willuhn
- * @N Extensions koennen jetzt auch dynamisch via Messaging verwendet werden
- *
- * Revision 1.8  2010/06/03 17:06:51  willuhn
- * @N getExtension(), damit man an die Instanz von bereits registrierten Extensions rankommt
- *
- * Revision 1.7  2010/06/03 12:41:43  willuhn
- * *** empty log message ***
- *
- * Revision 1.6  2010/06/03 12:41:33  willuhn
- * @N Throwable toleriert auch NoClassDefFoundError
- *
- * Revision 1.5  2005/06/07 21:57:32  web0
- * *** empty log message ***
- *
- * Revision 1.4  2005/06/06 10:10:43  web0
- * *** empty log message ***
- *
- * Revision 1.3  2005/05/30 12:01:33  web0
- * @R removed gui packages from rmic.xml
- *
- * Revision 1.2  2005/05/27 17:31:46  web0
- * @N extension system
- *
- * Revision 1.1  2005/05/25 16:11:47  web0
- * @N first code for extension system
- *
- *********************************************************************/

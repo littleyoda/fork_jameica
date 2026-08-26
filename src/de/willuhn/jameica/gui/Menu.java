@@ -12,7 +12,6 @@ package de.willuhn.jameica.gui;
 import java.rmi.RemoteException;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.Hashtable;
 import java.util.List;
 import java.util.Map;
 
@@ -29,6 +28,7 @@ import de.willuhn.datasource.GenericIterator;
 import de.willuhn.jameica.gui.extension.ExtensionRegistry;
 import de.willuhn.jameica.gui.util.SWTUtil;
 import de.willuhn.jameica.messaging.StatusBarMessage;
+import de.willuhn.jameica.plugin.Manifest;
 import de.willuhn.jameica.system.Application;
 import de.willuhn.jameica.system.Customizing;
 import de.willuhn.jameica.system.OperationCanceledException;
@@ -46,9 +46,11 @@ public class Menu
 
 	private Decorations parent;
 
+	// Lookup von unseren MenuItems auf die SWT-Objekte
   private Map<MenuItem,org.eclipse.swt.widgets.MenuItem> itemLookup = new HashMap<>();
-  private Map<String,MenuItem> idLookup = new HashMap<>();
-  private Map<String,String> pluginLookup = new HashMap<>();
+  
+  // Lookup von der ID eines Elements zum Menu-Item und dem Plugin
+  private Map<String,MenuData> idLookup = new HashMap<>();
   
   /**
    * Erzeugt eine neue Instanz des Dropdown-Menus.
@@ -75,8 +77,21 @@ public class Menu
    */
 	protected void add(MenuItem menu) throws Exception
 	{
-    add(menu,null);
+    this.add(menu,null);
 	}
+
+  /**
+   * Fügt das Menü eines ganzen Plugins hinzu.
+   * @param mf das Manifest des Plugins.
+   * @throws Exception
+   */
+  void add(Manifest mf) throws Exception
+  {
+    if (mf == null)
+      return;
+
+    this.add(mf.getMenu(),mf.getName());
+  }
 
   /**
    * Fuegt weitere Sub-Menus hinzu.
@@ -84,14 +99,14 @@ public class Menu
    * @param plugin Name des Plugins.
    * @throws Exception
    */
-	protected void add(MenuItem menu, String plugin) throws Exception
+	private void add(MenuItem menu, String plugin) throws Exception
 	{
     if (menu == null || mainMenu == null)
       return;
     
     if (Customizing.SETTINGS.getBoolean("application.menu.hideplugins",false))
       return;
-    
+
     load(menu,mainMenu,plugin);
 	}
 
@@ -129,8 +144,7 @@ public class Menu
     org.eclipse.swt.widgets.MenuItem item = new org.eclipse.swt.widgets.MenuItem(parentMenu,SWT.CASCADE);
 
     this.itemLookup.put(element,item);
-    this.idLookup.put(element.getID(),element);
-    this.pluginLookup.put(element.getID(),plugin);
+    this.idLookup.put(element.getID(),new MenuData(element,plugin));
 
     item.setData("item",element);
     item.setEnabled(element.isEnabled());
@@ -230,6 +244,7 @@ public class Menu
 	 * Laedt nur die Kinder.
    * @param element Element.
    * @param menu Menu.
+   * @param plugin das Plugin.
    * @throws Exception
    */
   private void loadChildren(final MenuItem element, org.eclipse.swt.widgets.Menu menu, String plugin) throws Exception
@@ -251,15 +266,16 @@ public class Menu
   public List<IconBarEntry> getActionItems()
   {
     List<IconBarEntry> result = new ArrayList<IconBarEntry>();
-    for (Object current:this.idLookup.values())
+    for (MenuData current:this.idLookup.values())
     {
       try
       {
-        MenuItem item = (MenuItem) current;
+        MenuItem item = current.item;
         if (item.getAction() == null)
           continue;
+        
         IconBarEntry entry = new IconBarEntry(IconBarEntry.TYPE_MENU,item.getID(),item.getName(),null);
-        entry.setPlugin((String) this.pluginLookup.get(item.getID()));
+        entry.setPlugin(current.plugin);
         result.add(entry);
       }
       catch (Exception e)
@@ -277,7 +293,7 @@ public class Menu
    */
   public void update(MenuItem item) throws RemoteException
   {
-    org.eclipse.swt.widgets.MenuItem mi = (org.eclipse.swt.widgets.MenuItem) itemLookup.get(item);
+    org.eclipse.swt.widgets.MenuItem mi = itemLookup.get(item);
     if (mi != null && !mi.isDisposed())
       mi.setEnabled(item.isEnabled());
   }
@@ -289,9 +305,31 @@ public class Menu
    */
   public MenuItem getItem(String id)
   {
-    if (id == null)
+    if (id == null || id.isBlank())
       return null;
-    return (MenuItem) this.idLookup.get(id);
+    
+    final MenuData m = this.idLookup.get(id);
+    return m != null ? m.item : null;
+  }
+  
+  /**
+   * Kapselt das Menu-Element zusammen mit dem Plugin.
+   */
+  private class MenuData
+  {
+    private MenuItem item = null;
+    private String plugin = null;
+    
+    /**
+     * ct.
+     * @param item
+     * @param plugin
+     */
+    private MenuData(MenuItem item, String plugin)
+    {
+      this.item = item;
+      this.plugin = plugin;
+    }
   }
 
 }
