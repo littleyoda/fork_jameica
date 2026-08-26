@@ -106,6 +106,7 @@ public class TablePart extends AbstractTablePart
   //////////////////////////////////////////////////////////
   // Flags
   private boolean enabled               = true;
+  private boolean sortable              = true;
   //////////////////////////////////////////////////////////
 
   //////////////////////////////////////////////////////////
@@ -621,16 +622,19 @@ public class TablePart extends AbstractTablePart
       
       
       // Sortierung
-      final int p = i;
-      col.addListener(SWT.Selection, new Listener() {
-        public void handleEvent(Event e)
-        {
-          // Wenn wir vorher schonmal nach dieser Spalte
-          // sortiert haben, kehren wir die Sortierung um
-          direction = !(direction && p == sortedBy);
-          orderBy(p);
-        }
-      });
+      if (this.sortable)
+      {
+        final int p = i;
+        col.addListener(SWT.Selection, new Listener() {
+          public void handleEvent(Event e)
+          {
+            // Wenn wir vorher schonmal nach dieser Spalte
+            // sortiert haben, kehren wir die Sortierung um
+            direction = !(direction && p == sortedBy);
+            orderBy(p);
+          }
+        });
+      }
 
 
       // Wenn Ausrichtung explizit angegeben, dann nehmen wir die
@@ -1293,6 +1297,15 @@ public class TablePart extends AbstractTablePart
   public boolean isEnabled()
   {
     return this.enabled;
+  }
+  
+  /**
+   * Legt fest, ob die Tabelle per Klick auf die Spalten sortiert werden kann.
+   * @param sortable true, wenn sortierbar.
+   */
+  public void setSortable(boolean sortable)
+  {
+    this.sortable = sortable;
   }
   
   /**
