@@ -171,6 +171,12 @@ public class LookupService implements MessageConsumer
     if (name == null || name.length() == 0)
       return null;
 
+    if (name.startsWith("tcp:"))
+    {
+      Logger.warn("refusing insecure multicast lookup for plaintext TCP service: " + name);
+      return null;
+    }
+
     Logger.info("performing multicast lookup for service name: " + name);
     ServerLookup s = null;
     try
@@ -251,6 +257,9 @@ public class LookupService implements MessageConsumer
     @Override
     public void received(DatagramPacket packet) throws IOException
     {
+      if (this.name.startsWith("tcp:"))
+        return;
+
       InetAddress sender = packet.getAddress();
       InetAddress self   = InetAddress.getLocalHost();
       if (sender.equals(self))
