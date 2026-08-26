@@ -14,7 +14,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -42,6 +41,7 @@ import de.willuhn.jameica.gui.util.Color;
 import de.willuhn.jameica.gui.util.Font;
 import de.willuhn.jameica.messaging.MessageBus;
 import de.willuhn.jameica.messaging.StatusBarMessage;
+import de.willuhn.jameica.plugin.Manifest;
 import de.willuhn.jameica.services.SystrayService;
 import de.willuhn.jameica.system.Application;
 import de.willuhn.jameica.system.Customizing;
@@ -71,8 +71,10 @@ public class Navigation implements Part
   private TreeItem pluginTree		= null;
   
   private Map<String,TreeItem> itemLookup  = new HashMap<String,TreeItem>();
-  private Map<String,String> pluginLookup  = new HashMap<String,String>();
-  private Map<String,NavigationItem> navigationLookup = new LinkedHashMap<String,NavigationItem>();
+  
+  // Lookup von der ID eines Elements zum Navigation-Item und dem Plugin
+  private Map<String,NavigationData> idLookup = new HashMap<>();
+
   private Map<NavigationItem,String> navigationSource = new IdentityHashMap<NavigationItem,String>();
   
   /**
@@ -432,9 +434,8 @@ public class Navigation implements Part
     String id = element.getID();
     if (id == null)
       return;
-
-    this.navigationLookup.put(id,element);
-    this.pluginLookup.put(id,plugin);
+    
+    this.idLookup.put(id,new NavigationData(element,plugin));
   }
 
   /**
@@ -444,22 +445,26 @@ public class Navigation implements Part
    */
   protected void add(NavigationItem navi) throws Exception
 	{
-    add(navi,null);
+    if (navi == null)
+      return;
+    
+    load(navi,this.pluginTree,null);
 	}
 
   /**
-   * Fuegt einen weiteren Navigationszweig hinzu.
+   * Fügt die Navigation eines ganzen Plugins hinzu.
    * @param navi das hinzuzufuegende Navigations-Element.
    * @param plugin Name des Plugins.
    * @throws Exception
    */
-  protected void add(NavigationItem navi, String plugin) throws Exception
+  void add(Manifest mf) throws Exception
 	{
-		if (navi == null)
+		if (mf == null)
 			return;
-		load(navi,this.pluginTree,plugin);
+		
+		load(mf.getNavigation(),this.pluginTree,mf.getName());
 	}
-  
+
   /**
    * Laed einen Navigationszweig neu. Dabei werden alle 
    * existierenden Einträge durch die neu übergebenen ersetzt.
@@ -476,19 +481,19 @@ public class Navigation implements Part
     if (ti == null || ti.isDisposed())
       return;
     
-    NavigationItem current = this.navigationLookup.get(item.getID());
-    if (current != null && current != item)
-      unregisterChildren(current);
+    NavigationData current = this.idLookup.get(item.getID());
+    if (current != null && current.item != item)
+      unregisterChildren(item);
 
-    //Existierende Childs entfernen
+    // Existierende Childs entfernen
     for (TreeItem i : ti.getItems())
     {
       unregister((NavigationItem) i.getData(KEY_NAVIGATION));
       i.dispose();
     }
     
-    //Childs neu laden
-    loadChildren(item,ti,this.pluginLookup.get(item.getID()));
+    // Childs neu laden
+    loadChildren(item,ti,current.plugin);
   }
 
   /**
@@ -526,8 +531,7 @@ public class Navigation implements Part
       String id = item.getID();
       if (id != null)
       {
-        this.navigationLookup.remove(id);
-        this.pluginLookup.remove(id);
+        this.idLookup.remove(id);
         this.navigationSource.remove(item);
       }
 
@@ -552,10 +556,12 @@ public class Navigation implements Part
       return;
 
     String id = item.getID();
-    if (id != null && this.navigationLookup.containsKey(id))
-      this.navigationLookup.put(id,item);
+    
+    NavigationData nd = this.idLookup.get(id);
+    if (nd != null)
+      nd.item = item;
 
-    TreeItem ti = this.itemLookup.get(item.getID());
+    TreeItem ti = this.itemLookup.get(id);
     if (ti == null || ti.isDisposed())
       return;
     
@@ -575,9 +581,9 @@ public class Navigation implements Part
     if (id == null)
       return null;
 
-    NavigationItem item = this.navigationLookup.get(id);
-    if (item != null)
-      return item;
+    NavigationData nd = this.idLookup.get(id);
+    if (nd != null)
+      return nd.item;
 
     TreeItem ti = this.itemLookup.get(id);
     if (ti == null || ti.isDisposed())
@@ -593,7 +599,7 @@ public class Navigation implements Part
   public java.util.List<IconBarEntry> getActionItems()
   {
     List<IconBarEntry> result = new ArrayList<IconBarEntry>();
-    for (NavigationItem item:this.navigationLookup.values())
+    for (NavigationData item:this.idLookup.values())
       collectActionItem(item,result);
 
     return result;
@@ -601,20 +607,20 @@ public class Navigation implements Part
 
   /**
    * Sammelt einen ausfuehrbaren Navigationseintrag.
-   * @param item Navigation-Item.
+   * @param nd Die Daten des Navi-Elements.
    * @param result Ergebnisliste.
    */
-  private void collectActionItem(NavigationItem item, List<IconBarEntry> result)
+  private void collectActionItem(NavigationData nd, List<IconBarEntry> result)
   {
-    if (item == null)
+    if (nd == null || nd.item == null)
       return;
-
+    
     try
     {
-      if (item.getAction() != null)
+      if (nd.item.getAction() != null)
       {
-        IconBarEntry entry = new IconBarEntry(IconBarEntry.TYPE_NAVIGATION,item.getID(),item.getName(),null);
-        entry.setPlugin(this.pluginLookup.get(item.getID()));
+        IconBarEntry entry = new IconBarEntry(IconBarEntry.TYPE_NAVIGATION,nd.item.getID(),nd.item.getName(),null);
+        entry.setPlugin(nd.plugin);
         result.add(entry);
       }
     }
@@ -881,6 +887,26 @@ public class Navigation implements Part
 
         start((NavigationItem) items[0].getData(KEY_NAVIGATION),e);
       }
+    }
+  }
+  
+  /**
+   * Kapselt das Navi-Element zusammen mit dem Plugin.
+   */
+  private class NavigationData
+  {
+    private NavigationItem item = null;
+    private String plugin = null;
+    
+    /**
+     * ct.
+     * @param item
+     * @param plugin
+     */
+    private NavigationData(NavigationItem item, String plugin)
+    {
+      this.item = item;
+      this.plugin = plugin;
     }
   }
 

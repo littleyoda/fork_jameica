@@ -326,8 +326,8 @@ public class GUI implements ApplicationController
         }
         try
         {
-          menu.add(mf.getMenu(),mf.getName());
-          navi.add(mf.getNavigation(),mf.getName());
+          menu.add(mf);
+          navi.add(mf);
         }
         catch (Throwable t)
         {

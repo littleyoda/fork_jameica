@@ -214,6 +214,7 @@ public class IconBar implements Part
       items.addAll(getBookmarkItems());
 
       SearchableListDialog dialog = new SearchableListDialog(items,AbstractDialog.POSITION_CENTER);
+      dialog.setText(Application.getI18n().tr("Bitte wählen Sie das hinzuzufügende Element."));
       dialog.setTitle(Application.getI18n().tr("Eintrag w\u00e4hlen"));
       dialog.addColumn(Application.getI18n().tr("Bezeichnung"),"name");
       dialog.addColumn(Application.getI18n().tr("Quelle"),"source");

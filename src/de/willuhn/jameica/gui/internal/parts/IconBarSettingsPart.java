@@ -32,16 +32,18 @@ import de.willuhn.jameica.gui.GUI;
 import de.willuhn.jameica.gui.IconBarEntry;
 import de.willuhn.jameica.gui.IconBarSettings;
 import de.willuhn.jameica.gui.Part;
-import de.willuhn.jameica.gui.formatter.TableFormatter;
 import de.willuhn.jameica.gui.dialogs.AbstractDialog;
 import de.willuhn.jameica.gui.dialogs.SearchableListDialog;
+import de.willuhn.jameica.gui.formatter.TableFormatter;
 import de.willuhn.jameica.gui.input.CheckboxInput;
 import de.willuhn.jameica.gui.input.SelectInput;
 import de.willuhn.jameica.gui.parts.Button;
 import de.willuhn.jameica.gui.parts.ButtonArea;
 import de.willuhn.jameica.gui.parts.TablePart;
 import de.willuhn.jameica.gui.parts.table.FeatureSummary;
+import de.willuhn.jameica.gui.util.Container;
 import de.willuhn.jameica.gui.util.SWTUtil;
+import de.willuhn.jameica.gui.util.SimpleContainer;
 import de.willuhn.jameica.plugin.Manifest;
 import de.willuhn.jameica.system.Application;
 import de.willuhn.jameica.system.OperationCanceledException;
@@ -56,6 +58,8 @@ public class IconBarSettingsPart implements Part
   private CheckboxInput visible;
   private SelectInput size;
   private TablePart table;
+  private Button add;
+  private Button space;
   private Button remove;
   private Button up;
   private Button down;
@@ -69,20 +73,23 @@ public class IconBarSettingsPart implements Part
    */
   public void paint(Composite parent) throws RemoteException
   {
-    getVisible().paint(parent);
-    getSize().paint(parent);
-    getTable().paint(parent);
+    final Container container = new SimpleContainer(parent,true);
+    container.addInput(this.getVisible());
+    container.addInput(this.getSize());
+    container.addPart(getTable());
+    
     parent.addDisposeListener(event -> disposeTableImages());
 
     ButtonArea buttons = new ButtonArea();
-    buttons.addButton(new Button(Application.getI18n().tr("Hinzuf\u00fcgen"),new Add(),null,false,"list-add.png"));
-    buttons.addButton(new Button(Application.getI18n().tr("Abstand einf\u00fcgen"),new AddSpacer(),null,false,"go-next.png"));
+    buttons.addButton(getAddButton());
     buttons.addButton(getRemoveButton());
+    buttons.addButton(getSpaceButton());
     buttons.addButton(getUpButton());
     buttons.addButton(getDownButton());
     buttons.addButton(getIconButton());
     buttons.addButton(getResetIconButton());
-    buttons.paint(parent);
+    
+    container.addButtonArea(buttons);
   }
 
   /**
@@ -141,7 +148,7 @@ public class IconBarSettingsPart implements Part
         return Application.getI18n().tr("Mittel");
       }
     };
-    this.size.setName(Application.getI18n().tr("Icon-Gr\u00f6sse"));
+    this.size.setName(Application.getI18n().tr("Icon-Gr\u00f6\u00dfe"));
     this.size.addListener(event -> refreshTable());
     return this.size;
   }
@@ -226,6 +233,22 @@ public class IconBarSettingsPart implements Part
         image.dispose();
     }
     this.tableImages.clear();
+  }
+
+  private Button getAddButton()
+  {
+    if (this.add != null)
+      return this.add;
+    this.add = new Button(Application.getI18n().tr("Hinzuf\u00fcgen"),new Add(),null,false,"list-add.png");
+    return this.add;
+  }
+
+  private Button getSpaceButton()
+  {
+    if (this.space != null)
+      return this.space;
+    this.space = new Button(Application.getI18n().tr("Abstand einf\u00fcgen"),new AddSpacer(),null,false,"media-playback-stop.png");
+    return this.space;
   }
 
   private Button getRemoveButton()
@@ -387,6 +410,7 @@ public class IconBarSettingsPart implements Part
         items.addAll(GUI.getMenu().getActionItems());
         items.addAll(de.willuhn.jameica.gui.IconBar.getBookmarkItems());
         SearchableListDialog dialog = new SearchableListDialog(items,AbstractDialog.POSITION_CENTER);
+        dialog.setText(Application.getI18n().tr("Bitte wählen Sie das hinzuzufügende Element."));
         dialog.setTitle(Application.getI18n().tr("Eintrag w\u00e4hlen"));
         dialog.addColumn(Application.getI18n().tr("Bezeichnung"),"name");
         dialog.addColumn(Application.getI18n().tr("Quelle"),"source");
@@ -527,6 +551,7 @@ public class IconBarSettingsPart implements Part
 
         List<IconFile> icons = getIcons();
         SearchableListDialog dialog = new SearchableListDialog(icons,AbstractDialog.POSITION_CENTER);
+        dialog.setText(Application.getI18n().tr("Bitte wählen Sie das hinzuzufügende Element."));
         dialog.setTitle(Application.getI18n().tr("Icon w\u00e4hlen"));
         dialog.addColumn(Application.getI18n().tr("Vorschau"),"preview");
         dialog.addColumn(Application.getI18n().tr("Datei"),"name");

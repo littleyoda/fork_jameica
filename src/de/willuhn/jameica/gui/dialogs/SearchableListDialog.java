@@ -20,15 +20,16 @@ import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Text;
 
 import de.willuhn.datasource.BeanUtil;
-import de.willuhn.datasource.GenericIterator;
 import de.willuhn.jameica.gui.Action;
 import de.willuhn.jameica.gui.formatter.Formatter;
 import de.willuhn.jameica.gui.formatter.TableFormatter;
+import de.willuhn.jameica.gui.internal.buttons.Cancel;
 import de.willuhn.jameica.gui.parts.ButtonArea;
 import de.willuhn.jameica.gui.parts.Column;
 import de.willuhn.jameica.gui.parts.TablePart;
 import de.willuhn.jameica.gui.parts.table.FeatureSummary;
-import de.willuhn.jameica.system.OperationCanceledException;
+import de.willuhn.jameica.gui.util.Container;
+import de.willuhn.jameica.gui.util.SimpleContainer;
 import de.willuhn.logging.Logger;
 import de.willuhn.util.ApplicationException;
 
@@ -38,7 +39,7 @@ import de.willuhn.util.ApplicationException;
 public class SearchableListDialog extends AbstractDialog
 {
   private Object object            = null;
-  private GenericIterator iterator = null;
+  private String text              = null;
   private List list                = null;
   private List<Column> columns     = new ArrayList<Column>();
   private TableFormatter formatter = null;
@@ -48,30 +49,10 @@ public class SearchableListDialog extends AbstractDialog
    * @param list anzuzeigende Liste.
    * @param position Position.
    */
-  public SearchableListDialog(GenericIterator list, int position)
-  {
-    this(position);
-    this.iterator = list;
-  }
-
-  /**
-   * ct.
-   * @param list anzuzeigende Liste.
-   * @param position Position.
-   */
   public SearchableListDialog(List list, int position)
   {
-    this(position);
-    this.list = list;
-  }
-
-  /**
-   * ct.
-   * @param position Position.
-   */
-  private SearchableListDialog(int position)
-  {
     super(position);
+    this.list = list;
     setSize(SWT.DEFAULT,420);
   }
 
@@ -118,17 +99,33 @@ public class SearchableListDialog extends AbstractDialog
   {
     this.formatter = formatter;
   }
+  
+  /**
+   * Fügt noch einen optionalen Hinweis-Text hinzu.
+   * @param text der anzuzeigende Text.
+   */
+  public void setText(String text)
+  {
+    if (text == null)
+      return;
+    
+    this.text = text;
+  }
 
   /**
    * @see de.willuhn.jameica.gui.dialogs.AbstractDialog#paint(org.eclipse.swt.widgets.Composite)
    */
   protected void paint(Composite parent) throws Exception
   {
-    final List items = getSourceItems();
-    final TablePart table = new TablePart(items,new MyAction());
+    Container container = new SimpleContainer(parent,true,1);
+    
+    if (this.text != null && this.text.length() > 0)
+      container.addText(this.text,true);
 
-    final Text search = new Text(parent,SWT.SEARCH | SWT.ICON_SEARCH | SWT.CANCEL);
-    search.setMessage(i18n.tr("Suchen..."));
+    final TablePart table = new TablePart(this.list,new MyAction());
+
+    final Text search = new Text(container.getComposite(),SWT.SEARCH | SWT.ICON_SEARCH | SWT.CANCEL);
+    search.setMessage(i18n.tr("Suche..."));
     search.setLayoutData(new GridData(GridData.FILL_HORIZONTAL));
     search.addModifyListener(new ModifyListener()
     {
@@ -136,7 +133,7 @@ public class SearchableListDialog extends AbstractDialog
       {
         try
         {
-          applySearch(table,items,search.getText());
+          applySearch(table,list,search.getText());
         }
         catch (Exception e)
         {
@@ -156,8 +153,8 @@ public class SearchableListDialog extends AbstractDialog
     table.setRememberColWidths(true);
     table.setRememberOrder(true);
     table.setRememberState(false);
-    table.paint(parent);
-
+    container.addPart(table);
+    
     ButtonArea b = new ButtonArea();
     b.addButton(i18n.tr("\u00dcbernehmen"), new Action()
     {
@@ -166,38 +163,10 @@ public class SearchableListDialog extends AbstractDialog
         object = table.getSelection();
         close();
       }
-    });
-    b.addButton(i18n.tr("Abbrechen"), new Action()
-    {
-      public void handleAction(Object context) throws ApplicationException
-      {
-        object = null;
-        throw new OperationCanceledException();
-      }
-    });
-    b.paint(parent);
-  }
-
-  /**
-   * Liefert die Datenquelle als Liste.
-   * @return Liste.
-   */
-  private List getSourceItems()
-  {
-    if (this.list != null)
-      return this.list;
-
-    List result = new ArrayList();
-    try
-    {
-      while (this.iterator != null && this.iterator.hasNext())
-        result.add(this.iterator.next());
-    }
-    catch (Exception e)
-    {
-      throw new RuntimeException(e);
-    }
-    return result;
+    },null,false,"ok.png");
+    b.addButton(new Cancel());
+    
+    container.addButtonArea(b);
   }
 
   /**
