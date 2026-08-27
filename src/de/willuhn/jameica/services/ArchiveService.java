@@ -26,7 +26,6 @@ import de.willuhn.boot.BootLoader;
 import de.willuhn.boot.Bootable;
 import de.willuhn.boot.SkipServiceException;
 import de.willuhn.io.IOUtil;
-import de.willuhn.jameica.messaging.LookupService;
 import de.willuhn.jameica.messaging.Message;
 import de.willuhn.jameica.messaging.MessageConsumer;
 import de.willuhn.jameica.messaging.QueryMessage;
@@ -167,8 +166,8 @@ public class ArchiveService implements Bootable
     try
     {
       // Wir checken, ob ein Archiv-Server verfuegbar ist
-      String uri = LookupService.lookup("tcp:de.willuhn.jameica.messaging.Plugin.connector.tcp");
-      if (uri != null)
+      String uri = Application.getConfig().getArchiveServer();
+      if (uri != null && !uri.isBlank())
       {
         int colon = uri.indexOf(':');
         if (colon != -1)

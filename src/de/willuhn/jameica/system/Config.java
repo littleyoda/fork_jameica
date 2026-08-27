@@ -102,6 +102,15 @@ public final class Config
   }
 
   /**
+   * Liefert Servername und Port eines ggf. zu verwendenden Archiv-Servers.
+   * @return Servername und Port des Archiv-Servers. Format: "hostname:port".
+   */
+  public String getArchiveServer()
+  {
+    return settings.getString("jameica.system.archive.server",null);
+  }
+
+  /**
    * Liefert den fuer die lokale RMI-Registry zu verwendenden TCP-Port.
    * @return Nummer des TCP-Ports.
    */
