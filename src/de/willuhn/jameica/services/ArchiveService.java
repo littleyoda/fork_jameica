@@ -16,6 +16,7 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.util.Arrays;
 import java.util.LinkedList;
@@ -34,10 +35,9 @@ import de.willuhn.logging.Logger;
 
 /**
  * Ein Archiv-Service, der Daten an eine andere Jameica-Instanz senden kann,
- * auf der das Plugin "jameica.messaging" installiert ist. Da diese andere
- * Jameica-Instanz via Multicast-Lookup automatisch im LAN gefunden wird,
- * kann man auf diese Weise einen konfigurationsfreien Archiv-Server aufsetzen
- * und Dokumente einfach via QueryMessage an den Server senden. 
+ * auf der das Plugin "jameica.messaging" installiert ist. Der entfernte
+ * Archiv-Server muss explizit per Konfiguration hinterlegt werden. Der
+ * verwendete Legacy-Transport ist weder verschluesselt noch authentifiziert.
  * 
  * Falls auf dem lokalen System bereits das Plugin "jameica.messaging" installiert
  * ist, schaltet Jameica automatisch in lokale Zustellung um. In dem Fall wird
@@ -137,8 +137,7 @@ public class ArchiveService implements Bootable
   
   /**
    * Liefert true, wenn der Archive-Service verfügbar ist, weil entweder lokal das Plugin
-   * jameica.messaging installiert ist oder aber im LAN eine Instanz per Multicast-Lookup
-   * gefunden wurde.
+   * jameica.messaging installiert oder ein entfernter Archiv-Server explizit konfiguriert ist.
    * @return true, wenn der Archive-Service verfügbar ist.
    */
   public boolean isEnabled()
@@ -165,19 +164,13 @@ public class ArchiveService implements Bootable
     
     try
     {
-      // Wir checken, ob ein Archiv-Server verfuegbar ist
-      String uri = Application.getConfig().getArchiveServer();
-      if (uri != null && !uri.isBlank())
+      InetSocketAddress endpoint = parseArchiveServer(Application.getConfig().getArchiveServer());
+      if (endpoint != null)
       {
-        int colon = uri.indexOf(':');
-        if (colon != -1)
-        {
-          // Jepp, wir haben eine URI
-          this.host = uri.substring(0,colon);
-          this.port = Integer.parseInt(uri.substring(colon+1));
-          Logger.info("remote jameica.messaging available on " + this.host + ":" + this.port);
-          this.enabled = true;
-        }
+        this.host = endpoint.getHostString();
+        this.port = endpoint.getPort();
+        Logger.warn("using explicitly configured archive server without transport encryption or authentication: " + this.host + ":" + this.port);
+        this.enabled = true;
       }
     }
     catch (Exception e)
@@ -207,6 +200,34 @@ public class ArchiveService implements Bootable
     Application.getMessagingFactory().getMessagingQueue("jameica.messaging.list").registerMessageConsumer(this.list);
     Application.getMessagingFactory().getMessagingQueue("jameica.messaging.getmeta").registerMessageConsumer(this.getMeta);
     Application.getMessagingFactory().getMessagingQueue("jameica.messaging.putmeta").registerMessageConsumer(this.putMeta);
+  }
+
+  /**
+   * Prueft die explizite Konfiguration eines entfernten Archiv-Servers.
+   * @param value Konfiguration im Format "hostname:port".
+   * @return ungeaufloester Endpunkt oder {@code null}, wenn kein Server konfiguriert ist.
+   */
+  static InetSocketAddress parseArchiveServer(String value)
+  {
+    if (value == null || value.trim().length() == 0)
+      return null;
+
+    String endpoint = value.trim();
+    int colon = endpoint.lastIndexOf(':');
+    if (colon <= 0 || colon == endpoint.length() - 1)
+      throw new IllegalArgumentException("archive server must use hostname:port");
+
+    String host = endpoint.substring(0,colon).trim();
+    if (host.startsWith("[") && host.endsWith("]"))
+      host = host.substring(1,host.length() - 1);
+    if (host.length() == 0)
+      throw new IllegalArgumentException("archive server hostname is empty");
+
+    int port = Integer.parseInt(endpoint.substring(colon + 1).trim());
+    if (port < 1 || port > 65535)
+      throw new IllegalArgumentException("archive server port is out of range");
+
+    return InetSocketAddress.createUnresolved(host,port);
   }
 
   /**
