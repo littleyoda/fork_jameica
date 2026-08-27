@@ -18,6 +18,7 @@ import java.io.FileOutputStream;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.Writer;
 import java.nio.file.Path;
 import java.text.DateFormat;
@@ -26,6 +27,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.Enumeration;
+import java.util.Properties;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
@@ -47,6 +49,18 @@ public class BackupEngine
   private final static DateFormat format = new SimpleDateFormat("yyyyMMdd__HH_mm_ss");
   private final static String PREFIX = "jameica-backup-";
   private final static String MARKER = ".restore";
+  private final static String[] ACTIVE_CONTENT_DIRECTORIES =
+  {
+    "plugins",
+    "updates"
+  };
+  private final static String[] SCRIPT_SETTINGS =
+  {
+    "cfg/de.willuhn.jameica.services.ScriptingService.properties",
+    "cfg/de.willuhn.jameica.scripting.Plugin.properties"
+  };
+  private final static String CONFIG_SETTINGS = "cfg/de.willuhn.jameica.system.Config.properties";
+  private final static String UPDATE_SETTINGS = "cfg/de.willuhn.jameica.services.UpdateService.properties";
   
   /**
    * Liefert eine Liste der bisher erstellten Backups.
@@ -205,6 +219,8 @@ public class BackupEngine
     try (ZipFile zip = new ZipFile(backup.getFile()))
     {
       validateRestore(zip,workdir);
+      // Backups are data, not a trusted way to register code for the next startup.
+      validateActiveContent(zip,workdir);
 
       // Restore-Marker loeschen. Muessen wir vor der Erstellung des Backups machen
       BackupEngine.undoRestoreMark();
@@ -273,6 +289,89 @@ public class BackupEngine
       }
     }
   }
+
+  /**
+   * Rejects restored active content before any existing data is removed.
+   * Script files themselves remain valid backup content and can be registered
+   * again explicitly after the restore. Plugin and update directories contain
+   * code that the normal backup writer deliberately excludes.
+   * @param zip backup to inspect.
+   * @param targetDirectory restore target directory.
+   * @throws ApplicationException if the backup would activate restored code.
+   */
+  static void validateActiveContent(ZipFile zip, File targetDirectory) throws ApplicationException
+  {
+    try
+    {
+      Path target = targetDirectory.getCanonicalFile().toPath();
+      Enumeration<? extends ZipEntry> entries = zip.entries();
+      while (entries.hasMoreElements())
+      {
+        ZipEntry entry = entries.nextElement();
+        Path destination = getRestorePath(entry,targetDirectory);
+        String name = target.relativize(destination).toString().replace(File.separatorChar,'/');
+        int separator = name.indexOf('/');
+        String topLevel = separator >= 0 ? name.substring(0,separator) : name;
+        if (isActiveContentDirectory(topLevel))
+          throw new ApplicationException("Backup contains executable plugin or update files");
+
+        String activeKey = null;
+        for (String candidate:SCRIPT_SETTINGS)
+        {
+          if (candidate.equalsIgnoreCase(name))
+          {
+            activeKey = "scripts";
+            break;
+          }
+        }
+        if (CONFIG_SETTINGS.equalsIgnoreCase(name))
+          activeKey = "jameica.plugin.dir";
+        boolean config = CONFIG_SETTINGS.equalsIgnoreCase(name);
+        boolean update = UPDATE_SETTINGS.equalsIgnoreCase(name);
+        if ((activeKey == null && !config && !update) || entry.isDirectory())
+          continue;
+
+        Properties properties = new Properties();
+        try (InputStream input = zip.getInputStream(entry))
+        {
+          properties.load(input);
+        }
+        for (String key:properties.stringPropertyNames())
+        {
+          String value = properties.getProperty(key).trim();
+          if (activeKey != null && (activeKey.equals(key) || key.startsWith(activeKey + ".")) && value.length() > 0)
+            throw new ApplicationException("Backup contains active script or plugin registrations");
+          if (config && "jameica.system.archive.server".equals(key) && value.length() > 0)
+            throw new ApplicationException("Backup contains an active archive server endpoint");
+          if (update && "update.install".equals(key) && "true".equalsIgnoreCase(value))
+            throw new ApplicationException("Backup enables automatic plugin installation");
+        }
+      }
+    }
+    catch (ApplicationException e)
+    {
+      throw e;
+    }
+    catch (Exception e)
+    {
+      throw new ApplicationException("Unable to validate restored active content",e);
+    }
+  }
+
+  /**
+   * Checks whether a directory contains code activated by Jameica.
+   * @param name top-level directory name.
+   * @return true if the directory must not be backed up or restored as data.
+   */
+  private static boolean isActiveContentDirectory(String name)
+  {
+    for (String active:ACTIVE_CONTENT_DIRECTORIES)
+    {
+      if (active.equalsIgnoreCase(name))
+        return true;
+    }
+    return false;
+  }
   
   /**
    * Erstellt ein frisches Backup.
@@ -317,12 +416,10 @@ public class BackupEngine
         if (!children[i].isDirectory())
           continue; // Wir sichern nur Unterverzeichnisse. Also keine Backups (rekursiv) und Logs
         
-        // Wir sichern die Verzeichnisse "plugins" und "updates" nicht mit. Die koennen jederzeit
-        // neu installiert werden
-        if ("updates".equals(children[i].getName()))
+        // Plugins und Updates koennen jederzeit neu installiert werden.
+        if (isActiveContentDirectory(children[i].getName()))
           continue;
-        if ("plugins".equals(children[i].getName()))
-          continue;
+        // Nicht mitsichern, falls das Benutzerverzeichnis direkt eine Ext-Partition ist.
         if ("lost+found".equals(children[i].getName()))
           continue;
         if (children[i].getCanonicalFile().equals(dir.getCanonicalFile()))
@@ -403,20 +500,37 @@ public class BackupEngine
    */
   static void validateRestore(ZipFile zip, File targetDirectory) throws IOException
   {
-    Path target = targetDirectory.getCanonicalFile().toPath();
     Enumeration<? extends ZipEntry> entries = zip.entries();
     while (entries.hasMoreElements())
-    {
-      ZipEntry entry = entries.nextElement();
-      String name = entry.getName();
-      String portableName = name.replace('\\','/');
-      if (portableName.startsWith("/") || portableName.matches("^[A-Za-z]:.*"))
-        throw new IOException("invalid ZIP entry: " + name);
+      getRestorePath(entries.nextElement(),targetDirectory);
+  }
 
-      Path file = new File(targetDirectory,portableName).getCanonicalFile().toPath();
-      if (file.equals(target) || !file.startsWith(target))
+  /**
+   * Resolves a portable ZIP entry to the canonical extraction destination.
+   * @param entry ZIP entry to resolve.
+   * @param targetDirectory extraction root.
+   * @return canonical extraction destination.
+   * @throws IOException if the name is unsafe or leaves the extraction root.
+   */
+  private static Path getRestorePath(ZipEntry entry, File targetDirectory) throws IOException
+  {
+    String name = entry.getName();
+    String portableName = name.replace('\\','/');
+    if (portableName.startsWith("/"))
+      throw new IOException("invalid ZIP entry: " + name);
+
+    String[] components = portableName.split("/",-1);
+    for (String component:components)
+    {
+      if (component.indexOf(':') >= 0 || component.endsWith(".") || component.endsWith(" "))
         throw new IOException("invalid ZIP entry: " + name);
     }
+
+    Path target = targetDirectory.getCanonicalFile().toPath();
+    Path file = new File(targetDirectory,portableName).getCanonicalFile().toPath();
+    if (file.equals(target) || !file.startsWith(target))
+      throw new IOException("invalid ZIP entry: " + name);
+    return file;
   }
 }
 

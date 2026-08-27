@@ -13,6 +13,7 @@ package de.willuhn.jameica.backup;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
@@ -24,86 +25,59 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
+import de.willuhn.util.ApplicationException;
+
 /**
- * Tests fuer die Validierung von Backup-Dateien.
+ * Tests restore-path and active-content validation of backup files.
  */
 public class BackupEngineTest
 {
-  /** Testverzeichnis. */
+  /** Test directory. */
   @Rule
-  public TemporaryFolder tmp = new TemporaryFolder();
+  public TemporaryFolder folder = new TemporaryFolder();
 
   /**
-   * Legitime Eintraege innerhalb des Zielverzeichnisses werden akzeptiert.
-   * @throws Exception
+   * Ordinary entries pass both validators without closing the shared ZIP.
    */
   @Test
-  public void testValidEntries() throws Exception
+  public void acceptValidEntriesAndKeepZipOpen() throws Exception
   {
-    File target = tmp.newFolder("target");
-    File file = this.createZip("valid.zip","cfg/test.properties","data/test.txt");
-    try (ZipFile zip = new ZipFile(file))
+    File target = folder.newFolder("valid-target");
+    File backup = createBackup("cfg/test.properties","value=data\n","data/test.txt","data");
+    try (ZipFile zip = new ZipFile(backup))
     {
       BackupEngine.validateRestore(zip,target);
+      BackupEngine.validateActiveContent(zip,target);
+      Assert.assertNotNull(zip.getEntry("data/test.txt"));
     }
   }
 
-  /**
-   * Ein Pfad ausserhalb des Zielverzeichnisses wird abgelehnt.
-   * @throws Exception
-   */
+  /** Relative traversal must leave no entry outside the target. */
   @Test
-  public void testPathTraversal() throws Exception
+  public void rejectPathTraversal() throws Exception
   {
-    File target = tmp.newFolder("target");
-    this.assertInvalid(target,"invalid.zip","../outside.txt");
+    File target = folder.newFolder("traversal-target");
+    assertInvalidPath(target,"../outside.txt");
+    assertInvalidPath(target,"nested/../../outside.txt");
+    assertInvalidPath(target,"nested/..");
   }
 
-  /**
-   * Auch verschachtelte Traversal-Pfade werden abgelehnt.
-   * @throws Exception
-   */
+  /** POSIX, drive-letter and UNC absolute paths are all invalid. */
   @Test
-  public void testNestedPathTraversal() throws Exception
+  public void rejectAbsolutePaths() throws Exception
   {
-    File target = tmp.newFolder("nested-target");
-    this.assertInvalid(target,"nested-invalid.zip","nested/../../outside.txt");
-    this.assertInvalid(target,"root-invalid.zip","nested/..");
+    File target = folder.newFolder("absolute-target");
+    assertInvalidPath(target,new File(folder.getRoot(),"outside.txt").getAbsolutePath());
+    assertInvalidPath(target,"C:\\outside.txt");
+    assertInvalidPath(target,"\\\\server\\share\\outside.txt");
   }
 
-  /**
-   * Absolute Pfade werden abgelehnt.
-   * @throws Exception
-   */
+  /** Existing links must not lead outside the restore target. */
   @Test
-  public void testAbsolutePath() throws Exception
+  public void rejectSymlinkTraversal() throws Exception
   {
-    File target = tmp.newFolder("absolute-target");
-    File outside = new File(tmp.getRoot(),"absolute-outside.txt");
-    this.assertInvalid(target,"absolute-invalid.zip",outside.getAbsolutePath());
-  }
-
-  /**
-   * Windows-Laufwerks- und UNC-Pfade werden plattformunabhaengig abgelehnt.
-   * @throws Exception
-   */
-  @Test
-  public void testWindowsAbsolutePaths() throws Exception
-  {
-    File target = tmp.newFolder("windows-target");
-    this.assertInvalid(target,"drive-invalid.zip","C:\\outside.txt");
-    this.assertInvalid(target,"unc-invalid.zip","\\\\server\\share\\outside.txt");
-  }
-
-  /**
-   * Bestehende Symlinks duerfen nicht aus dem Zielverzeichnis fuehren.
-   * @throws Exception
-   */
-  @Test
-  public void testSymlinkTraversal() throws Exception
-  {
-    File target = tmp.newFolder("symlink-target");
-    File outside = tmp.newFolder("symlink-outside");
+    File target = folder.newFolder("symlink-target");
+    File outside = folder.newFolder("symlink-outside");
     try
     {
       Files.createSymbolicLink(new File(target,"link").toPath(),outside.toPath());
@@ -112,25 +86,165 @@ public class BackupEngineTest
     {
       Assume.assumeNoException(e);
     }
-    this.assertInvalid(target,"symlink-invalid.zip","link/outside.txt");
+    assertInvalidPath(target,"link/outside.txt");
   }
 
-  /**
-   * Prueft, dass ein einzelner ungueltiger Eintrag abgelehnt wird.
-   * @param target Zielverzeichnis.
-   * @param zipName Dateiname des Archivs.
-   * @param entryName Name des ZIP-Eintrags.
-   * @throws Exception
-   */
-  private void assertInvalid(File target, String zipName, String entryName) throws Exception
+  /** NTFS alternate-stream syntax is not a portable backup entry name. */
+  @Test
+  public void rejectAlternateDataStreamName() throws Exception
   {
-    File file = this.createZip(zipName,entryName);
-    try (ZipFile zip = new ZipFile(file))
+    File target = folder.newFolder("ads-target");
+    assertInvalidPath(target,"cfg/de.willuhn.jameica.services.ScriptingService.properties::$DATA");
+  }
+
+  /** Windows aliases must not normalize a different component into active data. */
+  @Test
+  public void rejectTrailingDotAndSpaceComponents() throws Exception
+  {
+    File target = folder.newFolder("windows-alias-target");
+    assertInvalidPath(target,"plugins./untrusted/plugin.xml");
+    assertInvalidPath(target,"plugins /untrusted/plugin.xml");
+  }
+
+  /** Ordinary settings, data and unregistered scripts remain restorable. */
+  @Test
+  public void acceptDataOnlyBackup() throws Exception
+  {
+    File target = folder.newFolder("data-target");
+    File backup = createBackup(
+        "cfg/de.willuhn.jameica.services.ScriptingService.properties","migrated=20260827\nscript.encoding=UTF-8\n",
+        "cfg/de.willuhn.jameica.services.UpdateService.properties","update.check=true\nupdate.install=false\n",
+        "cfg/de.willuhn.jameica.system.Config.properties","jameica.system.archive.server=  \n",
+        "scripts/report.js","print('registered manually after restore');\n",
+        "data/plugins/plugin.xml","<plugin/>",
+        "plugins-old/readme.txt","ordinary data\n",
+        "lost+found/orphan","ordinary data\n");
+    try (ZipFile zip = new ZipFile(backup))
+    {
+      BackupEngine.validateRestore(zip,target);
+      BackupEngine.validateActiveContent(zip,target);
+    }
+  }
+
+  /** Current scripting settings must not activate code during startup. */
+  @Test(expected=ApplicationException.class)
+  public void rejectCurrentScriptRegistration() throws Exception
+  {
+    validateActive("cfg/de.willuhn.jameica.services.ScriptingService.properties","scripts.0=scripts/restore.js\n");
+  }
+
+  /** Legacy scripting settings are migrated and therefore equally active. */
+  @Test(expected=ApplicationException.class)
+  public void rejectLegacyScriptRegistration() throws Exception
+  {
+    validateActive("cfg/de.willuhn.jameica.scripting.Plugin.properties","scripts.0=scripts/restore.js\n");
+  }
+
+  /** Java-properties escapes must not bypass the key check. */
+  @Test(expected=ApplicationException.class)
+  public void rejectEscapedScriptRegistration() throws Exception
+  {
+    validateActive("cfg/de.willuhn.jameica.services.ScriptingService.properties","scr\\u0069pts.0=scripts/restore.js\n");
+  }
+
+  /** Redundant path segments must not bypass protected-path checks. */
+  @Test(expected=ApplicationException.class)
+  public void rejectNormalizedScriptSettingsPath() throws Exception
+  {
+    validateActive("cfg/old/../de.willuhn.jameica.services.ScriptingService.properties","scripts.0=scripts/restore.js\n");
+  }
+
+  /** Plugin files contain active code and are not valid backup data. */
+  @Test(expected=ApplicationException.class)
+  public void rejectRestoredPlugin() throws Exception
+  {
+    validateActive("plugins/untrusted/plugin.xml","<plugin/>");
+  }
+
+  /** Matching is case-insensitive and follows canonical path resolution. */
+  @Test(expected=ApplicationException.class)
+  public void rejectNormalizedPluginDirectory() throws Exception
+  {
+    validateActive("data/../PlUgInS/untrusted/plugin.xml","<plugin/>");
+  }
+
+  /** Backslash-separated update paths follow the same policy. */
+  @Test(expected=ApplicationException.class)
+  public void rejectRestoredUpdate() throws Exception
+  {
+    validateActive("UPDATES\\update.jar","content");
+  }
+
+  /** A restored config must not activate a separate plugin directory. */
+  @Test(expected=ApplicationException.class)
+  public void rejectConfiguredPluginDirectory() throws Exception
+  {
+    validateActive("cfg/de.willuhn.jameica.system.Config.properties","jameica.plugin.dir.0=/tmp/untrusted\n");
+  }
+
+  /** A restored config must not silently reactivate a plaintext archive endpoint. */
+  @Test(expected=ApplicationException.class)
+  public void rejectConfiguredArchiveServer() throws Exception
+  {
+    validateActive("cfg/de.willuhn.jameica.system.Config.properties","jameica.system.archive.server=archive.example:8080\n");
+  }
+
+  /** Automatic plugin installation is active code delivery, including escaped values. */
+  @Test(expected=ApplicationException.class)
+  public void rejectAutomaticPluginInstallation() throws Exception
+  {
+    validateActive("cfg/de.willuhn.jameica.services.UpdateService.properties","update.check=true\nupdate.install=tr\\u0075e\nlastrun=0\n");
+  }
+
+  /** Canonical in-root aliases into the live plugin directory remain active. */
+  @Test
+  public void rejectSymlinkAliasIntoPluginDirectory() throws Exception
+  {
+    File target = folder.newFolder("active-alias-target");
+    File plugins = new File(target,"plugins");
+    Assert.assertTrue(plugins.mkdir());
+    try
+    {
+      Files.createSymbolicLink(new File(target,"alias").toPath(),plugins.toPath());
+    }
+    catch (IOException | UnsupportedOperationException e)
+    {
+      Assume.assumeNoException(e);
+    }
+
+    File backup = createBackup("alias/untrusted/plugin.xml","<plugin/>");
+    try (ZipFile zip = new ZipFile(backup))
+    {
+      BackupEngine.validateRestore(zip,target);
+      try
+      {
+        BackupEngine.validateActiveContent(zip,target);
+        Assert.fail("canonical plugin alias was accepted");
+      }
+      catch (ApplicationException expected)
+      {
+        // expected
+      }
+    }
+  }
+
+  private void validateActive(String name, String content) throws Exception
+  {
+    File target = folder.newFolder("active-target-" + System.nanoTime());
+    try (ZipFile zip = new ZipFile(createBackup(name,content)))
+    {
+      BackupEngine.validateActiveContent(zip,target);
+    }
+  }
+
+  private void assertInvalidPath(File target, String name) throws Exception
+  {
+    try (ZipFile zip = new ZipFile(createBackup(name,"test")))
     {
       try
       {
         BackupEngine.validateRestore(zip,target);
-        Assert.fail("ZIP entry was accepted: " + entryName);
+        Assert.fail("ZIP entry was accepted: " + name);
       }
       catch (IOException expected)
       {
@@ -139,22 +253,15 @@ public class BackupEngineTest
     }
   }
 
-  /**
-   * Erzeugt eine ZIP-Datei fuer den Test.
-   * @param name Dateiname.
-   * @param entries Eintraege.
-   * @return die ZIP-Datei.
-   * @throws Exception
-   */
-  private File createZip(String name, String... entries) throws Exception
+  private File createBackup(String... entries) throws Exception
   {
-    File file = new File(tmp.getRoot(),name);
+    File file = folder.newFile("backup-" + System.nanoTime() + ".zip");
     try (ZipOutputStream zip = new ZipOutputStream(new FileOutputStream(file)))
     {
-      for (String nameOfEntry:entries)
+      for (int i=0;i<entries.length;i+=2)
       {
-        zip.putNextEntry(new ZipEntry(nameOfEntry));
-        zip.write("test".getBytes("ISO-8859-1"));
+        zip.putNextEntry(new ZipEntry(entries[i]));
+        zip.write(entries[i+1].getBytes(StandardCharsets.ISO_8859_1));
         zip.closeEntry();
       }
     }
