@@ -27,6 +27,7 @@ import de.willuhn.boot.BootLoader;
 import de.willuhn.boot.Bootable;
 import de.willuhn.boot.SkipServiceException;
 import de.willuhn.io.IOUtil;
+import de.willuhn.jameica.messaging.ArchiveServerEndpoint;
 import de.willuhn.jameica.messaging.Message;
 import de.willuhn.jameica.messaging.MessageConsumer;
 import de.willuhn.jameica.messaging.QueryMessage;
@@ -115,6 +116,9 @@ import de.willuhn.logging.Logger;
  */
 public class ArchiveService implements Bootable
 {
+  private static final int CONNECT_TIMEOUT_MILLIS = 10000;
+  private static final int READ_TIMEOUT_MILLIS = 30000;
+
   private String host = null;
   private int port    = -1;
   private boolean enabled = false;
@@ -164,7 +168,7 @@ public class ArchiveService implements Bootable
     
     try
     {
-      InetSocketAddress endpoint = parseArchiveServer(Application.getConfig().getArchiveServer());
+      InetSocketAddress endpoint = ArchiveServerEndpoint.parse(Application.getConfig().getArchiveServer());
       if (endpoint != null)
       {
         this.host = endpoint.getHostString();
@@ -203,34 +207,6 @@ public class ArchiveService implements Bootable
   }
 
   /**
-   * Prueft die explizite Konfiguration eines entfernten Archiv-Servers.
-   * @param value Konfiguration im Format "hostname:port".
-   * @return ungeaufloester Endpunkt oder {@code null}, wenn kein Server konfiguriert ist.
-   */
-  static InetSocketAddress parseArchiveServer(String value)
-  {
-    if (value == null || value.trim().length() == 0)
-      return null;
-
-    String endpoint = value.trim();
-    int colon = endpoint.lastIndexOf(':');
-    if (colon <= 0 || colon == endpoint.length() - 1)
-      throw new IllegalArgumentException("archive server must use hostname:port");
-
-    String host = endpoint.substring(0,colon).trim();
-    if (host.startsWith("[") && host.endsWith("]"))
-      host = host.substring(1,host.length() - 1);
-    if (host.length() == 0)
-      throw new IllegalArgumentException("archive server hostname is empty");
-
-    int port = Integer.parseInt(endpoint.substring(colon + 1).trim());
-    if (port < 1 || port > 65535)
-      throw new IllegalArgumentException("archive server port is out of range");
-
-    return InetSocketAddress.createUnresolved(host,port);
-  }
-
-  /**
    * @see de.willuhn.boot.Bootable#shutdown()
    */
   public void shutdown()
@@ -256,7 +232,10 @@ public class ArchiveService implements Bootable
     
     try
     {
-      return new Socket(host,port);
+      Socket socket = new Socket();
+      socket.connect(new InetSocketAddress(host,port),CONNECT_TIMEOUT_MILLIS);
+      socket.setSoTimeout(READ_TIMEOUT_MILLIS);
+      return socket;
     }
     catch (Exception e)
     {

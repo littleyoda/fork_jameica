@@ -22,8 +22,34 @@ public class LookupServiceTest
    * Plaintext TCP services must not be selected through unauthenticated discovery.
    */
   @Test
-  public void rejectPlaintextTcpLookup()
+  public void useOnlyExplicitEndpointForCanonicalLegacyLookup()
   {
-    Assert.assertNull(LookupService.lookup("tcp:de.willuhn.jameica.messaging.Plugin.connector.tcp"));
+    Assert.assertEquals("archive.example:9099",LookupService.resolveTcpLookup(ArchiveServerEndpoint.LOOKUP_NAME,"archive.example:9099"));
+    Assert.assertEquals("[2001:db8::1]:9099",LookupService.resolveTcpLookup(ArchiveServerEndpoint.LOOKUP_NAME,"[2001:db8::1]:9099"));
+    Assert.assertNull(LookupService.resolveTcpLookup(ArchiveServerEndpoint.LOOKUP_NAME,null));
+  }
+
+  /**
+   * Case, whitespace, aliases, and unrelated TCP names must not become
+   * compatibility lookups.
+   */
+  @Test
+  public void rejectTcpLookupVariants()
+  {
+    String[] invalid = new String[]{
+        ArchiveServerEndpoint.LOOKUP_NAME.toUpperCase(),
+        " " + ArchiveServerEndpoint.LOOKUP_NAME,
+        ArchiveServerEndpoint.LOOKUP_NAME + " ",
+        "TCP :de.willuhn.jameica.messaging.Plugin.connector.tcp",
+        "t c p:de.willuhn.jameica.messaging.Plugin.connector.tcp",
+        "\u00a0tcp:de.willuhn.jameica.messaging.Plugin.connector.tcp",
+        "tcp:de.willuhn.jameica.messaging.Plugin.connector.other",
+        "tcp://archive.example:9099"
+    };
+    for (String name:invalid)
+    {
+      Assert.assertTrue(ArchiveServerEndpoint.isTcpLookup(name));
+      Assert.assertNull(LookupService.resolveTcpLookup(name,"archive.example:9099"));
+    }
   }
 }
