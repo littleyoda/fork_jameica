@@ -18,6 +18,7 @@ import java.io.InputStreamReader;
 import java.io.Reader;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -46,6 +47,7 @@ import de.willuhn.jameica.messaging.SystemMessage;
 import de.willuhn.jameica.system.Application;
 import de.willuhn.jameica.system.Platform;
 import de.willuhn.jameica.system.Settings;
+import de.willuhn.jameica.util.DateUtil;
 import de.willuhn.logging.Logger;
 import de.willuhn.util.ApplicationException;
 import de.willuhn.util.I18N;
@@ -99,6 +101,7 @@ public class ScriptingService implements Bootable
    */
   private void init()
   {
+    this.migrate();
     this.events.clear();
 
     // 1. Script-Engine laden
@@ -165,6 +168,36 @@ public class ScriptingService implements Bootable
     // 3. Message-Consumer fuer Invoke-Aufrufe
     this.mcInvoke = new InvokeScriptMessageConsumer();
     Application.getMessagingFactory().getMessagingQueue("jameica.scripting").registerMessageConsumer(this.mcInvoke);
+  }
+  
+  /**
+   * Hilfsklasse zum Migrieren der Settings vom Plugin zu Jameica-intern.
+   */
+  private void migrate()
+  {
+    if (settings.getString("migrated",null) != null)
+      return;
+    
+    File file = new File(Application.getConfig().getConfigDir(),"de.willuhn.jameica.scripting.Plugin.properties");
+    if (file.exists() && file.canRead())
+    {
+      Logger.info("migrating scripting-settings from " + file);
+      de.willuhn.util.Settings source = new de.willuhn.util.Settings(null,file);
+      String[] keys = source.getAttributes();
+      for (String s:keys)
+      {
+        String value = source.getString(s,null);
+        Logger.info("  " + s + "=" + value);
+        settings.setAttribute(s,value);
+      }
+      settings.setAttribute("migrated",DateUtil.DEFAULT_FORMAT.format(new Date()));
+      Logger.info("deleting " + file);
+      if (!file.delete())
+      {
+        Logger.warn("could not delete " + file);
+        file.deleteOnExit();
+      }
+    }
   }
   
   /**
