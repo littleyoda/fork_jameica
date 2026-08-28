@@ -61,7 +61,7 @@ public class BackupEngine
   private final static String CONFIG_SETTINGS = "cfg/de.willuhn.jameica.system.Config.properties";
   private final static String UPDATE_SETTINGS = "cfg/de.willuhn.jameica.services.UpdateService.properties";
   private final static String REPOSITORY_SETTINGS = "cfg/de.willuhn.jameica.services.RepositoryService.properties";
-  private final static String[] TRUSTED_REPOSITORIES = Stream.concat(Arrays.stream(RepositoryService.WELL_KNOWN),Stream.of(RepositoryService.SYSTEM_REPOSITORY)).toArray(String[]::new);
+  private final static String[] TRUSTED_REPOSITORIES = Stream.concat(Arrays.stream(RepositoryService.Defaults.WELL_KNOWN),Stream.of(RepositoryService.Defaults.SYSTEM_REPOSITORY)).toArray(String[]::new);
   
   /**
    * Liefert eine Liste der bisher erstellten Backups.
@@ -324,7 +324,7 @@ public class BackupEngine
           activeKey = "scripts";
         if (isSettingsFile(lexicalName,canonicalName,CONFIG_SETTINGS))
           activeKey = "jameica.plugin.dir";
-        
+
         boolean update = isSettingsFile(lexicalName,canonicalName,UPDATE_SETTINGS);
         boolean repository = isSettingsFile(lexicalName,canonicalName,REPOSITORY_SETTINGS);
 
@@ -344,7 +344,7 @@ public class BackupEngine
           automaticUpdate |= "true".equalsIgnoreCase(properties.getProperty("update.install","").trim());
           continue;
         }
-        
+
         // Wenn es die Repository-Datei ist, dann checken, ob unbekannte Repositories vorhanden sind
         if (repository)
         {
@@ -365,7 +365,7 @@ public class BackupEngine
           }
         }
       }
-      
+
       // Unbekannte Repositories und gleichzeitig automatische Updates lassen wir aus Sicherheitsgründen nicht zu
       if (automaticUpdate && untrustedRepository)
         throw new ApplicationException(Application.getI18n().tr("Das Backup enthält sowohl unbekannte Repositories sowie automatische Updates und wird aus Sicherheitsgründen nicht wiederhergestellt"));
