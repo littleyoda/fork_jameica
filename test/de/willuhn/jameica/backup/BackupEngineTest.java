@@ -48,7 +48,7 @@ public class BackupEngineTest
     try (ZipFile zip = new ZipFile(backup))
     {
       BackupEngine.validateRestore(zip,target);
-      BackupEngine.validateActiveContent(zip,target);
+      Assert.assertFalse(BackupEngine.validateActiveContent(zip,target));
       Assert.assertNotNull(zip.getEntry("data/test.txt"));
     }
   }
@@ -125,7 +125,7 @@ public class BackupEngineTest
     try (ZipFile zip = new ZipFile(backup))
     {
       BackupEngine.validateRestore(zip,target);
-      BackupEngine.validateActiveContent(zip,target);
+      Assert.assertFalse(BackupEngine.validateActiveContent(zip,target));
       new ZipExtractor(zip).extract(target);
     }
     Assert.assertArrayEquals(updateSettings.getBytes(StandardCharsets.ISO_8859_1),
@@ -174,25 +174,25 @@ public class BackupEngineTest
         "CFG/DE.WILLUHN.JAMEICA.SERVICES.UPDATESERVICE.PROPERTIES","update.install=false\n");
   }
 
-  /** Current scripting settings must not activate code during startup. */
-  @Test(expected=ApplicationException.class)
-  public void rejectCurrentScriptRegistration() throws Exception
+  /** Current scripting settings require an explicit trust decision. */
+  @Test
+  public void confirmCurrentScriptRegistration() throws Exception
   {
-    validateActive("cfg/de.willuhn.jameica.services.ScriptingService.properties","scripts.0=scripts/restore.js\n");
+    assertRequiresConfirmation("cfg/de.willuhn.jameica.services.ScriptingService.properties","scripts.0=scripts/restore.js\n");
   }
 
-  /** Java-properties escapes must not bypass the script-key check. */
-  @Test(expected=ApplicationException.class)
-  public void rejectEscapedScriptRegistration() throws Exception
+  /** Java-properties escapes must not bypass the confirmation check. */
+  @Test
+  public void confirmEscapedScriptRegistration() throws Exception
   {
-    validateActive("cfg/de.willuhn.jameica.services.ScriptingService.properties","scr\\u0069pts.0=scripts/restore.js\n");
+    assertRequiresConfirmation("cfg/de.willuhn.jameica.services.ScriptingService.properties","scr\\u0069pts.0=scripts/restore.js\n");
   }
 
   /** Whitespace filenames remain active because ScriptingService does not trim them. */
   @Test
-  public void rejectWhitespaceScriptRegistration() throws Exception
+  public void confirmWhitespaceScriptRegistration() throws Exception
   {
-    assertInvalidActive("cfg/de.willuhn.jameica.services.ScriptingService.properties","scripts.0=\\u0009\n",
+    assertRequiresConfirmation("cfg/de.willuhn.jameica.services.ScriptingService.properties","scripts.0=\\u0009\n",
         "\t","print('must remain inert');\n");
   }
 
@@ -224,13 +224,13 @@ public class BackupEngineTest
     validateActive("UPDATES\\update.jar","content");
   }
 
-  /** A restored config must not activate a separate plugin directory. */
+  /** A restored config requires confirmation before activating another plugin directory. */
   @Test
-  public void rejectConfiguredPluginDirectory() throws Exception
+  public void confirmConfiguredPluginDirectory() throws Exception
   {
     String name = "cfg/de.willuhn.jameica.system.Config.properties";
-    assertInvalidActive(name,"jameica.plugin.dir.0=/tmp/untrusted\n");
-    assertInvalidActive(name,"jameica.plugin.dir.0=\n");
+    assertRequiresConfirmation(name,"jameica.plugin.dir.0=/tmp/untrusted\n");
+    assertRequiresConfirmation(name,"jameica.plugin.dir.0=\n");
   }
 
   /** Canonical in-root aliases into the live plugin directory remain active. */
@@ -275,7 +275,16 @@ public class BackupEngineTest
     File target = folder.newFolder("active-target-" + System.nanoTime());
     try (ZipFile zip = new ZipFile(createBackup(entries)))
     {
-      BackupEngine.validateActiveContent(zip,target);
+      Assert.assertFalse(BackupEngine.validateActiveContent(zip,target));
+    }
+  }
+
+  private void assertRequiresConfirmation(String... entries) throws Exception
+  {
+    File target = folder.newFolder("confirm-active-target-" + System.nanoTime());
+    try (ZipFile zip = new ZipFile(createBackup(entries)))
+    {
+      Assert.assertTrue(BackupEngine.validateActiveContent(zip,target));
     }
   }
 

@@ -220,8 +220,13 @@ public class BackupEngine
     try (ZipFile zip = new ZipFile(backup.getFile()))
     {
       validateRestore(zip,workdir);
-      // Backups are data, not a trusted way to register code for the next startup.
-      validateActiveContent(zip,workdir);
+      // Backups are data, not an implicitly trusted way to register code for the next startup.
+      if (validateActiveContent(zip,workdir))
+      {
+        String question = Application.getI18n().tr("Das Backup enthält registrierte Scripts oder zusätzliche Plugin-Verzeichnisse. Diese Inhalte können beim Start beliebigen Code mit Ihren Benutzerrechten ausführen. Fahren Sie nur fort, wenn Sie Herkunft und Inhalt des Backups vollständig vertrauen. Wiederherstellung trotzdem fortsetzen?");
+        if (!Application.getCallback().askUser(question,false))
+          throw new ApplicationException(Application.getI18n().tr("Wiederherstellung des Backups auf Wunsch des Benutzers abgebrochen"));
+      }
 
       // Restore-Marker loeschen. Muessen wir vor der Erstellung des Backups machen
       BackupEngine.undoRestoreMark();
@@ -292,21 +297,23 @@ public class BackupEngine
   }
 
   /**
-   * Rejects restored active content before any existing data is removed.
-   * Script files themselves remain valid backup content and can be registered
-   * again explicitly after the restore. Plugin and update directories contain
-   * code that the normal backup writer deliberately excludes.
+   * Validates restored active content before any existing data is removed.
+   * Plugin and update directories contain code that the normal backup writer
+   * deliberately excludes and are always rejected. Script registrations and
+   * additional plugin directories require an explicit trust decision.
    * @param zip backup to inspect.
    * @param targetDirectory restore target directory.
-   * @throws ApplicationException if the backup would activate restored code.
+   * @return true if the restore requires explicit confirmation.
+   * @throws ApplicationException if the backup contains forbidden active content.
    */
-  static void validateActiveContent(ZipFile zip, File targetDirectory) throws ApplicationException
+  static boolean validateActiveContent(ZipFile zip, File targetDirectory) throws ApplicationException
   {
     try
     {
       Path target = targetDirectory.getCanonicalFile().toPath();
       boolean automaticUpdate = false;
       boolean untrustedRepository = false;
+      boolean confirmationRequired = false;
       Enumeration<? extends ZipEntry> entries = zip.entries();
       while (entries.hasMoreElements())
       {
@@ -361,7 +368,7 @@ public class BackupEngine
             String value = properties.getProperty(key);
             if ((activeKey.equals(key) || key.startsWith(activeKey + ".")) &&
                 (value.length() > 0 || "jameica.plugin.dir".equals(activeKey)))
-              throw new ApplicationException("Backup contains active script or plugin registrations");
+              confirmationRequired = true;
           }
         }
       }
@@ -369,6 +376,8 @@ public class BackupEngine
       // Unbekannte Repositories und gleichzeitig automatische Updates lassen wir aus Sicherheitsgründen nicht zu
       if (automaticUpdate && untrustedRepository)
         throw new ApplicationException(Application.getI18n().tr("Das Backup enthält sowohl unbekannte Repositories sowie automatische Updates und wird aus Sicherheitsgründen nicht wiederhergestellt"));
+
+      return confirmationRequired;
     }
     catch (ApplicationException e)
     {
