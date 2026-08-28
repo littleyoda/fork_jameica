@@ -17,12 +17,16 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.FileReader;
 import java.io.FileWriter;
+import java.io.IOException;
 import java.io.Writer;
+import java.nio.file.Path;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
+import java.util.Enumeration;
+import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
 import de.willuhn.io.FileFinder;
@@ -196,9 +200,12 @@ public class BackupEngine
     }
     
     boolean enabled = Application.getConfig().getUseBackup();
+    File workdir = new File(Application.getConfig().getWorkDir());
 
-    try
+    try (ZipFile zip = new ZipFile(backup.getFile()))
     {
+      validateRestore(zip,workdir);
+
       // Restore-Marker loeschen. Muessen wir vor der Erstellung des Backups machen
       BackupEngine.undoRestoreMark();
 
@@ -243,8 +250,7 @@ public class BackupEngine
 
       // Und sichern das Backup zurueck
       monitor.setStatusText("restoring backup " + backup.getFile().getAbsolutePath());
-      File workdir = new File(Application.getConfig().getWorkDir());
-      ZipExtractor ext = new ZipExtractor(new ZipFile(backup.getFile()));
+      ZipExtractor ext = new ZipExtractor(zip);
       ext.setMonitor(monitor);
       ext.extract(workdir);
       monitor.setStatusText("restore completed");
@@ -386,6 +392,30 @@ public class BackupEngine
           }
         }
       }
+    }
+  }
+
+  /**
+   * Prueft, dass alle Eintraege innerhalb des Zielverzeichnisses bleiben.
+   * @param zip das wiederherzustellende Backup.
+   * @param targetDirectory das Zielverzeichnis.
+   * @throws IOException wenn ein Eintrag das Zielverzeichnis verlaesst.
+   */
+  static void validateRestore(ZipFile zip, File targetDirectory) throws IOException
+  {
+    Path target = targetDirectory.getCanonicalFile().toPath();
+    Enumeration<? extends ZipEntry> entries = zip.entries();
+    while (entries.hasMoreElements())
+    {
+      ZipEntry entry = entries.nextElement();
+      String name = entry.getName();
+      String portableName = name.replace('\\','/');
+      if (portableName.startsWith("/") || portableName.matches("^[A-Za-z]:.*"))
+        throw new IOException("invalid ZIP entry: " + name);
+
+      Path file = new File(targetDirectory,portableName).getCanonicalFile().toPath();
+      if (file.equals(target) || !file.startsWith(target))
+        throw new IOException("invalid ZIP entry: " + name);
     }
   }
 }
