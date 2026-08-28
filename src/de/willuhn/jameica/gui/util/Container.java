@@ -298,7 +298,9 @@ public abstract class Container
     try
     {
       addSeparator();
-      final GridData g = new GridData(GridData.FILL_HORIZONTAL | GridData.HORIZONTAL_ALIGN_END);
+      // Der aeussere Container belegt die ganze Zeile. Die konkrete
+      // Ausrichtung der Buttons bestimmt ButtonArea selbst.
+      final GridData g = new GridData(GridData.FILL_HORIZONTAL);
       g.horizontalSpan = 2;
       final Composite comp = new Composite(getComposite(),SWT.NONE);
       comp.setLayoutData(g);
