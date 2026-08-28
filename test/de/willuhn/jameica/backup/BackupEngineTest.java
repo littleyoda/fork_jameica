@@ -25,6 +25,7 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
+import de.willuhn.io.ZipExtractor;
 import de.willuhn.util.ApplicationException;
 
 /**
@@ -111,10 +112,12 @@ public class BackupEngineTest
   public void acceptDataOnlyBackup() throws Exception
   {
     File target = folder.newFolder("data-target");
+    String updateSettings = "update.check=true\nupdate.install=true\n";
+    String configSettings = "jameica.system.archive.server=archive.example:8080\n";
     File backup = createBackup(
         "cfg/de.willuhn.jameica.services.ScriptingService.properties","migrated=20260827\nscript.encoding=UTF-8\n",
-        "cfg/de.willuhn.jameica.services.UpdateService.properties","update.check=true\nupdate.install=false\n",
-        "cfg/de.willuhn.jameica.system.Config.properties","jameica.system.archive.server=  \n",
+        "cfg/de.willuhn.jameica.services.UpdateService.properties",updateSettings,
+        "cfg/de.willuhn.jameica.system.Config.properties",configSettings,
         "scripts/report.js","print('registered manually after restore');\n",
         "data/plugins/plugin.xml","<plugin/>",
         "plugins-old/readme.txt","ordinary data\n",
@@ -123,7 +126,52 @@ public class BackupEngineTest
     {
       BackupEngine.validateRestore(zip,target);
       BackupEngine.validateActiveContent(zip,target);
+      new ZipExtractor(zip).extract(target);
     }
+    Assert.assertArrayEquals(updateSettings.getBytes(StandardCharsets.ISO_8859_1),
+        Files.readAllBytes(new File(target,"cfg/de.willuhn.jameica.services.UpdateService.properties").toPath()));
+    Assert.assertArrayEquals(configSettings.getBytes(StandardCharsets.ISO_8859_1),
+        Files.readAllBytes(new File(target,"cfg/de.willuhn.jameica.system.Config.properties").toPath()));
+  }
+
+  /** Preferences unrelated to script activation remain valid backup data. */
+  @Test
+  public void acceptLegitimateSettings() throws Exception
+  {
+    validateActive("cfg/de.willuhn.jameica.scripting.Plugin.properties","scripts.0=scripts/legacy.js\n");
+    validateActive("cfg/de.willuhn.jameica.system.Config.properties","jameica.system.archive.server=archive.example:8080\n");
+    validateActive("cfg/de.willuhn.jameica.services.UpdateService.properties","update.install=tr\\u0075e\n");
+    validateActive("cfg/de.willuhn.jameica.services.RepositoryService.properties","repository.url.0=https://packages.example/repository.xml\n");
+
+    String updateName = "cfg/de.willuhn.jameica.services.UpdateService.properties";
+    String update = "update.install=true\n";
+    String repositoryName = "cfg/de.willuhn.jameica.services.RepositoryService.properties";
+    validateActiveEntries(updateName,update,repositoryName,
+        "repository.url.0=https://www.willuhn.de/products/jameica/updates/extensions\n" +
+        "repository.url.1=https://openjverein.github.io/jameica-repository\n" +
+        "repository.url.2=https://www.open4me.de/hibiscus/\n" +
+        "repository.url.3=https://hibiscus.tvbrowser.org/\n");
+    validateActiveEntries(updateName,update,repositoryName,
+        "repository.url.0=https://attacker.example/repository.xml\n" +
+        "https\\://attacker.example/repository.xml.enabled=false\n");
+    validateActiveEntries(updateName,update,repositoryName,
+        "repository.url.foo=https://attacker.example/repository.xml\n" +
+        "repository.url.255=https://attacker.example/repository.xml\n" +
+        "repository.url.0=not a URL\n");
+  }
+
+  /** An external repository must not be combined with unattended installation. */
+  @Test
+  public void rejectAutomaticInstallFromRestoredRepository() throws Exception
+  {
+    String updateName = "cfg/de.willuhn.jameica.services.UpdateService.properties";
+    String update = "update.install=tr\\u0075e\n";
+    String repositoryName = "cfg/de.willuhn.jameica.services.RepositoryService.properties";
+    String repository = "repository.url.0=https://attacker.example/repository.xml\n";
+    assertInvalidActive(updateName,update,repositoryName,repository);
+    assertInvalidActive(repositoryName,repository,updateName,update);
+    assertInvalidActive(updateName,update,repositoryName,repository,
+        "CFG/DE.WILLUHN.JAMEICA.SERVICES.UPDATESERVICE.PROPERTIES","update.install=false\n");
   }
 
   /** Current scripting settings must not activate code during startup. */
@@ -133,25 +181,26 @@ public class BackupEngineTest
     validateActive("cfg/de.willuhn.jameica.services.ScriptingService.properties","scripts.0=scripts/restore.js\n");
   }
 
-  /** Legacy scripting settings are migrated and therefore equally active. */
-  @Test(expected=ApplicationException.class)
-  public void rejectLegacyScriptRegistration() throws Exception
-  {
-    validateActive("cfg/de.willuhn.jameica.scripting.Plugin.properties","scripts.0=scripts/restore.js\n");
-  }
-
-  /** Java-properties escapes must not bypass the key check. */
+  /** Java-properties escapes must not bypass the script-key check. */
   @Test(expected=ApplicationException.class)
   public void rejectEscapedScriptRegistration() throws Exception
   {
     validateActive("cfg/de.willuhn.jameica.services.ScriptingService.properties","scr\\u0069pts.0=scripts/restore.js\n");
   }
 
-  /** Redundant path segments must not bypass protected-path checks. */
-  @Test(expected=ApplicationException.class)
-  public void rejectNormalizedScriptSettingsPath() throws Exception
+  /** Whitespace filenames remain active because ScriptingService does not trim them. */
+  @Test
+  public void rejectWhitespaceScriptRegistration() throws Exception
   {
-    validateActive("cfg/old/../de.willuhn.jameica.services.ScriptingService.properties","scripts.0=scripts/restore.js\n");
+    assertInvalidActive("cfg/de.willuhn.jameica.services.ScriptingService.properties","scripts.0=\\u0009\n",
+        "\t","print('must remain inert');\n");
+  }
+
+  /** Malformed protected settings are rejected before existing data is removed. */
+  @Test(expected=ApplicationException.class)
+  public void rejectMalformedProtectedSettings() throws Exception
+  {
+    validateActive("cfg/de.willuhn.jameica.services.ScriptingService.properties","scripts.0=\\u12ZZ\n");
   }
 
   /** Plugin files contain active code and are not valid backup data. */
@@ -176,24 +225,12 @@ public class BackupEngineTest
   }
 
   /** A restored config must not activate a separate plugin directory. */
-  @Test(expected=ApplicationException.class)
+  @Test
   public void rejectConfiguredPluginDirectory() throws Exception
   {
-    validateActive("cfg/de.willuhn.jameica.system.Config.properties","jameica.plugin.dir.0=/tmp/untrusted\n");
-  }
-
-  /** A restored config must not silently reactivate a plaintext archive endpoint. */
-  @Test(expected=ApplicationException.class)
-  public void rejectConfiguredArchiveServer() throws Exception
-  {
-    validateActive("cfg/de.willuhn.jameica.system.Config.properties","jameica.system.archive.server=archive.example:8080\n");
-  }
-
-  /** Automatic plugin installation is active code delivery, including escaped values. */
-  @Test(expected=ApplicationException.class)
-  public void rejectAutomaticPluginInstallation() throws Exception
-  {
-    validateActive("cfg/de.willuhn.jameica.services.UpdateService.properties","update.check=true\nupdate.install=tr\\u0075e\nlastrun=0\n");
+    String name = "cfg/de.willuhn.jameica.system.Config.properties";
+    assertInvalidActive(name,"jameica.plugin.dir.0=/tmp/untrusted\n");
+    assertInvalidActive(name,"jameica.plugin.dir.0=\n");
   }
 
   /** Canonical in-root aliases into the live plugin directory remain active. */
@@ -230,10 +267,32 @@ public class BackupEngineTest
 
   private void validateActive(String name, String content) throws Exception
   {
+    validateActiveEntries(name,content);
+  }
+
+  private void validateActiveEntries(String... entries) throws Exception
+  {
     File target = folder.newFolder("active-target-" + System.nanoTime());
-    try (ZipFile zip = new ZipFile(createBackup(name,content)))
+    try (ZipFile zip = new ZipFile(createBackup(entries)))
     {
       BackupEngine.validateActiveContent(zip,target);
+    }
+  }
+
+  private void assertInvalidActive(String... entries) throws Exception
+  {
+    File target = folder.newFolder("invalid-active-target-" + System.nanoTime());
+    try (ZipFile zip = new ZipFile(createBackup(entries)))
+    {
+      try
+      {
+        BackupEngine.validateActiveContent(zip,target);
+        Assert.fail("active settings combination was accepted");
+      }
+      catch (ApplicationException expected)
+      {
+        // expected
+      }
     }
   }
 

@@ -20,6 +20,7 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.Writer;
+import java.net.URL;
 import java.nio.file.Path;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
@@ -54,13 +55,18 @@ public class BackupEngine
     "plugins",
     "updates"
   };
-  private final static String[] SCRIPT_SETTINGS =
-  {
-    "cfg/de.willuhn.jameica.services.ScriptingService.properties",
-    "cfg/de.willuhn.jameica.scripting.Plugin.properties"
-  };
+  private final static String SCRIPT_SETTINGS = "cfg/de.willuhn.jameica.services.ScriptingService.properties";
   private final static String CONFIG_SETTINGS = "cfg/de.willuhn.jameica.system.Config.properties";
   private final static String UPDATE_SETTINGS = "cfg/de.willuhn.jameica.services.UpdateService.properties";
+  private final static String REPOSITORY_SETTINGS = "cfg/de.willuhn.jameica.services.RepositoryService.properties";
+  private final static String[] TRUSTED_REPOSITORIES =
+  {
+    "https://www.willuhn.de/products/jameica/updates",
+    "https://www.willuhn.de/products/jameica/updates/extensions",
+    "https://openjverein.github.io/jameica-repository",
+    "https://www.open4me.de/hibiscus/",
+    "https://hibiscus.tvbrowser.org/"
+  };
   
   /**
    * Liefert eine Liste der bisher erstellten Backups.
@@ -304,31 +310,26 @@ public class BackupEngine
     try
     {
       Path target = targetDirectory.getCanonicalFile().toPath();
+      boolean automaticUpdate = false;
+      boolean untrustedRepository = false;
       Enumeration<? extends ZipEntry> entries = zip.entries();
       while (entries.hasMoreElements())
       {
         ZipEntry entry = entries.nextElement();
         Path destination = getRestorePath(entry,targetDirectory);
-        String name = target.relativize(destination).toString().replace(File.separatorChar,'/');
-        int separator = name.indexOf('/');
-        String topLevel = separator >= 0 ? name.substring(0,separator) : name;
-        if (isActiveContentDirectory(topLevel))
+        String canonicalName = target.relativize(destination).toString().replace(File.separatorChar,'/');
+        String lexicalName = new File(entry.getName().replace('\\','/')).toPath().normalize().toString().replace(File.separatorChar,'/');
+        if (isActiveContentDirectory(getTopLevel(lexicalName)) || isActiveContentDirectory(getTopLevel(canonicalName)))
           throw new ApplicationException("Backup contains executable plugin or update files");
 
         String activeKey = null;
-        for (String candidate:SCRIPT_SETTINGS)
-        {
-          if (candidate.equalsIgnoreCase(name))
-          {
-            activeKey = "scripts";
-            break;
-          }
-        }
-        if (CONFIG_SETTINGS.equalsIgnoreCase(name))
+        if (isSettingsFile(lexicalName,canonicalName,SCRIPT_SETTINGS))
+          activeKey = "scripts";
+        if (isSettingsFile(lexicalName,canonicalName,CONFIG_SETTINGS))
           activeKey = "jameica.plugin.dir";
-        boolean config = CONFIG_SETTINGS.equalsIgnoreCase(name);
-        boolean update = UPDATE_SETTINGS.equalsIgnoreCase(name);
-        if ((activeKey == null && !config && !update) || entry.isDirectory())
+        boolean update = isSettingsFile(lexicalName,canonicalName,UPDATE_SETTINGS);
+        boolean repository = isSettingsFile(lexicalName,canonicalName,REPOSITORY_SETTINGS);
+        if ((activeKey == null && !update && !repository) || entry.isDirectory())
           continue;
 
         Properties properties = new Properties();
@@ -338,15 +339,18 @@ public class BackupEngine
         }
         for (String key:properties.stringPropertyNames())
         {
-          String value = properties.getProperty(key).trim();
-          if (activeKey != null && (activeKey.equals(key) || key.startsWith(activeKey + ".")) && value.length() > 0)
+          String value = properties.getProperty(key);
+          if (activeKey != null && (activeKey.equals(key) || key.startsWith(activeKey + ".")) &&
+              (value.length() > 0 || "jameica.plugin.dir".equals(activeKey)))
             throw new ApplicationException("Backup contains active script or plugin registrations");
-          if (config && "jameica.system.archive.server".equals(key) && value.length() > 0)
-            throw new ApplicationException("Backup contains an active archive server endpoint");
-          if (update && "update.install".equals(key) && "true".equalsIgnoreCase(value))
-            throw new ApplicationException("Backup enables automatic plugin installation");
         }
+        if (update)
+          automaticUpdate |= "true".equalsIgnoreCase(properties.getProperty("update.install","").trim());
+        if (repository)
+          untrustedRepository |= hasActiveUntrustedRepository(properties);
       }
+      if (automaticUpdate && untrustedRepository)
+        throw new ApplicationException("Backup combines automatic plugin installation with an external repository");
     }
     catch (ApplicationException e)
     {
@@ -356,6 +360,56 @@ public class BackupEngine
     {
       throw new ApplicationException("Unable to validate restored active content",e);
     }
+  }
+
+  /** Mirrors the active repository-list semantics without contacting a server. */
+  private static boolean hasActiveUntrustedRepository(Properties properties)
+  {
+    for (int i=0;i<255;++i)
+    {
+      String value = properties.getProperty("repository.url." + i);
+      if (value == null || value.length() == 0)
+        continue;
+      try
+      {
+        String url = new URL(value).toString();
+        if (isTrustedRepository(url))
+          continue;
+
+        String enabled = properties.getProperty(url + ".enabled");
+        if (enabled == null || "true".equalsIgnoreCase(enabled.trim()))
+          return true;
+      }
+      catch (Exception e)
+      {
+        // RepositoryService ignores invalid URLs too.
+      }
+    }
+    return false;
+  }
+
+  /** Checks the system and bundled well-known repositories. */
+  private static boolean isTrustedRepository(String url)
+  {
+    for (String trusted:TRUSTED_REPOSITORIES)
+    {
+      if (trusted.equalsIgnoreCase(url))
+        return true;
+    }
+    return false;
+  }
+
+  /** Returns the first portable path component. */
+  private static String getTopLevel(String name)
+  {
+    int separator = name.indexOf('/');
+    return separator >= 0 ? name.substring(0,separator) : name;
+  }
+
+  /** Checks both the archive spelling and the canonical restore destination. */
+  private static boolean isSettingsFile(String lexicalName, String canonicalName, String expected)
+  {
+    return expected.equalsIgnoreCase(lexicalName) || expected.equalsIgnoreCase(canonicalName);
   }
 
   /**
