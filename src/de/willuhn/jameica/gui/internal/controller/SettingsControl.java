@@ -20,6 +20,8 @@ import org.eclipse.swt.widgets.Listener;
 
 import de.willuhn.jameica.gui.AbstractControl;
 import de.willuhn.jameica.gui.AbstractView;
+import de.willuhn.jameica.gui.GUI;
+import de.willuhn.jameica.gui.NavigationTreeSettingsAction;
 import de.willuhn.jameica.gui.Part;
 import de.willuhn.jameica.gui.dialogs.YesNoDialog;
 import de.willuhn.jameica.gui.input.CheckboxInput;
@@ -80,6 +82,7 @@ public class SettingsControl extends AbstractControl
   private CheckboxInput randomSplash;
   private CheckboxInput systray;
   private CheckboxInput minimizeToSystray;
+  private CheckboxInput navigationVisible;
   private IconBarSettingsPart iconBarSettings;
 	
   /**
@@ -405,6 +408,19 @@ public class SettingsControl extends AbstractControl
   }
 
   /**
+   * Liefert die Einstellung fuer die Sichtbarkeit der Navigation.
+   * @return Checkbox, die im aktivierten Zustand die Navigation anzeigt.
+   */
+  public CheckboxInput getNavigationVisible()
+  {
+    if (this.navigationVisible != null)
+      return this.navigationVisible;
+    boolean visible = !Customizing.SETTINGS.getBoolean("application.hidenavigation",false);
+    this.navigationVisible = new CheckboxInput(visible);
+    return this.navigationVisible;
+  }
+
+  /**
    * Speichert die Einstellungen.
    */
   public void handleStore()
@@ -455,6 +471,9 @@ public class SettingsControl extends AbstractControl
       final SystrayService systray = Application.getBootLoader().getBootable(SystrayService.class);
       systray.setEnabled(((Boolean)getSystray().getValue()).booleanValue());
       systray.setMinimizeToSystray(((Boolean)getMinimizeToSystray().getValue()).booleanValue());
+      boolean navigationVisible = ((Boolean)getNavigationVisible().getValue()).booleanValue();
+      Customizing.SETTINGS.setAttribute("application.hidenavigation",!navigationVisible);
+      GUI.toggleNavigation();
       getIconBarSettings().apply();
       
       Application.getMessagingFactory().sendSyncMessage(new SettingsChangedMessage());
@@ -492,6 +511,9 @@ public class SettingsControl extends AbstractControl
 			Color.SUCCESS.reset();
 			Color.LINK.reset();
 			Color.LINK_ACTIVE.reset();
+      Customizing.SETTINGS.setAttribute("application.hidenavigation",false);
+      GUI.toggleNavigation();
+      NavigationTreeSettingsAction.reset();
       Application.getConfig().setRmiPort(Config.RMI_DEFAULT_PORT);
       Application.getConfig().setLoglevel(Level.INFO.getName());
       Application.getConfig().setRmiSSL(true);

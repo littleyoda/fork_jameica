@@ -337,6 +337,8 @@ public class GUI implements ApplicationController
       //
       ////////////////////////////////////////////////////////////////////////
 
+      navi.filter.finishInitialLoading();
+
       if (iconBar != null)
         iconBar.redraw();
 

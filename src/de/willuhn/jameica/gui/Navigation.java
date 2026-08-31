@@ -66,16 +66,36 @@ public class Navigation implements Part
   private Settings settings     = new Settings(Navigation.class);
   private Tree mainTree					= null;
   private NavigationItem contextItem = null;
+  private TreeItem contextTreeItem = null;
   
 	// TreeItem, unterhalb dessen die Plugins eingehaengt werden. 
   private TreeItem pluginTree		= null;
   
-  private Map<String,TreeItem> itemLookup  = new HashMap<String,TreeItem>();
+  private final Map<String,TreeItem> itemLookup  = new HashMap<String,TreeItem>();
   
   // Lookup von der ID eines Elements zum Navigation-Item und dem Plugin
   private Map<String,NavigationData> idLookup = new HashMap<>();
 
   private Map<NavigationItem,String> navigationSource = new IdentityHashMap<NavigationItem,String>();
+
+  // Instanzgebunden, weil TreeItems nur zum Lebenszyklus dieses Navigation-Parts gehoeren.
+  final NavigationTreeFilter filter = new NavigationTreeFilter(this);
+
+  /**
+   * @return der Navigationsbaum.
+   */
+  Tree getTree()
+  {
+    return this.mainTree;
+  }
+
+  /**
+   * @return Zuordnung der technischen IDs zu den sichtbaren Baumeintraegen.
+   */
+  Map<String,TreeItem> getItemLookup()
+  {
+    return this.itemLookup;
+  }
   
   /**
    * @see de.willuhn.jameica.gui.Part#paint(org.eclipse.swt.widgets.Composite)
@@ -108,8 +128,8 @@ public class Navigation implements Part
     this.mainTree.addListener(SWT.MenuDetect, new Listener() {
       public void handleEvent(Event event)
       {
-        TreeItem item = mainTree.getItem(mainTree.toControl(event.x,event.y));
-        contextItem = item != null ? (NavigationItem) item.getData(KEY_NAVIGATION) : null;
+        contextTreeItem = mainTree.getItem(mainTree.toControl(event.x,event.y));
+        contextItem = contextTreeItem != null ? (NavigationItem) contextTreeItem.getData(KEY_NAVIGATION) : null;
       }
     });
     createContextMenu();
@@ -196,6 +216,39 @@ public class Navigation implements Part
       }
     });
 
+    final org.eclipse.swt.widgets.MenuItem hide = new org.eclipse.swt.widgets.MenuItem(menu,SWT.PUSH);
+    hide.setText(Application.getI18n().tr("Eintrag ausblenden"));
+    hide.setImage(de.willuhn.jameica.gui.util.SWTUtil.getImage("list-remove.png"));
+    hide.addListener(SWT.Selection,new Listener()
+    {
+      public void handleEvent(Event event)
+      {
+        // Der oberste Wurzelknoten muss immer erhalten bleiben. Alle anderen
+        // Eintraege koennen direkt ausgeblendet und spaeter im Dialog wieder
+        // aktiviert werden.
+        if (contextItem == null || contextTreeItem == null || contextTreeItem.getParentItem() == null)
+          return;
+
+        try
+        {
+          NavigationTreeFilterSettings.addHiddenId(contextItem.getID());
+          Navigation.this.filter.apply();
+        }
+        catch (Exception e)
+        {
+          Logger.error("unable to hide navigation item",e);
+          Application.getMessagingFactory().sendMessage(new StatusBarMessage(Application.getI18n().tr("Fehler beim Ausblenden des Navigationseintrags"),StatusBarMessage.TYPE_ERROR));
+        }
+      }
+    });
+
+    new org.eclipse.swt.widgets.MenuItem(menu,SWT.SEPARATOR);
+
+    final org.eclipse.swt.widgets.MenuItem settings = new org.eclipse.swt.widgets.MenuItem(menu,SWT.PUSH);
+    settings.setText(Application.getI18n().tr("Navigation anpassen..."));
+    settings.setImage(de.willuhn.jameica.gui.util.SWTUtil.getImage("document-properties.png"));
+    settings.addListener(SWT.Selection,event -> openNavigationSettings());
+
     menu.addListener(SWT.Show,new Listener()
     {
       public void handleEvent(Event event)
@@ -210,8 +263,24 @@ public class Navigation implements Part
           Logger.error("unable to update navigation context menu",e);
         }
         add.setEnabled(enabled);
+        hide.setEnabled(contextItem != null && contextTreeItem != null && contextTreeItem.getParentItem() != null);
       }
     });
+  }
+
+  /**
+   * Oeffnet die Einstellungen fuer die sichtbaren Navigationseintraege.
+   */
+  private void openNavigationSettings()
+  {
+    try
+    {
+      new NavigationTreeSettingsAction().handleAction(null);
+    }
+    catch (ApplicationException ae)
+    {
+      Application.getMessagingFactory().sendMessage(new StatusBarMessage(ae.getMessage(),StatusBarMessage.TYPE_ERROR));
+    }
   }
 
   /**
@@ -247,19 +316,7 @@ public class Navigation implements Part
 			item = new TreeItem(parentTree,SWT.NONE);
 		}
 
-    item.setFont(Font.DEFAULT.getSWTFont());
-    item.addDisposeListener(this.dsl);
-    item.setData(KEY_NAVIGATION,element);
-		item.setText(name == null ? "" : name);
-    expand(item);
-    
-    if (!element.isEnabled())
-    {
-      item.setGrayed(true);
-      item.setForeground(Color.COMMENT.getSWTColor());
-    }
-    
-    this.itemLookup.put(element.getID(),item);
+    initialize(item,element);
     register(element,plugin);
 
     // Bevor wir die Kinder laden, geben wir das Element noch der
@@ -449,6 +506,7 @@ public class Navigation implements Part
       return;
     
     load(navi,this.pluginTree,null);
+    this.filter.apply();
 	}
 
   /**
@@ -463,6 +521,7 @@ public class Navigation implements Part
 			return;
 		
 		load(mf.getNavigation(),this.pluginTree,mf.getName());
+		this.filter.apply();
 	}
 
   /**
@@ -477,13 +536,22 @@ public class Navigation implements Part
   {
     if (item == null)
       return;
+
+    this.filter.restoreForRefresh(item.getID());
+
     TreeItem ti = this.itemLookup.get(item.getID());
     if (ti == null || ti.isDisposed())
       return;
     
     NavigationData current = this.idLookup.get(item.getID());
     if (current != null && current.item != item)
-      unregisterChildren(item);
+    {
+      unregisterChildren(current.item);
+      current.item = item;
+      ti.setData(KEY_NAVIGATION,item);
+      ti.setText(item.getName());
+      ti.setImage(ti.getExpanded() ? item.getIconOpen() : item.getIconClose());
+    }
 
     // Existierende Childs entfernen
     for (TreeItem i : ti.getItems())
@@ -493,7 +561,9 @@ public class Navigation implements Part
     }
     
     // Childs neu laden
-    loadChildren(item,ti,current.plugin);
+    loadChildren(item,ti,current != null ? current.plugin : null);
+
+    this.filter.apply();
   }
 
   /**
@@ -561,6 +631,8 @@ public class Navigation implements Part
     if (nd != null)
       nd.item = item;
 
+    this.filter.update(item);
+
     TreeItem ti = this.itemLookup.get(id);
     if (ti == null || ti.isDisposed())
       return;
@@ -569,6 +641,44 @@ public class Navigation implements Part
     ti.setForeground(item.isEnabled() ? Color.FOREGROUND.getSWTColor() : Color.COMMENT.getSWTColor());
     ti.setText(item.getName());
     ti.setData(KEY_NAVIGATION,item);
+  }
+
+  /**
+   * Liest das fachliche NavigationItem aus einem sichtbaren SWT-Knoten.
+   * @param item SWT-Knoten.
+   * @return NavigationItem oder null bei ungueltigem beziehungsweise entsorgtem Knoten.
+   */
+  NavigationItem getNavigationItem(TreeItem item)
+  {
+    if (item == null || item.isDisposed())
+      return null;
+    Object data = item.getData(KEY_NAVIGATION);
+    return data instanceof NavigationItem ? (NavigationItem) data : null;
+  }
+
+  /**
+   * Initialisiert einen sichtbaren SWT-Knoten einheitlich fuer regulaeres Laden
+   * und Wiederherstellung durch den Filter.
+   * @param treeItem zu initialisierender SWT-Knoten.
+   * @param item fachlicher Navigationseintrag.
+   * @throws RemoteException bei nicht lesbaren Eigenschaften des Eintrags.
+   */
+  void initialize(TreeItem treeItem, NavigationItem item) throws RemoteException
+  {
+    treeItem.setFont(Font.DEFAULT.getSWTFont());
+    treeItem.addDisposeListener(this.dsl);
+    treeItem.setData(KEY_NAVIGATION,item);
+    treeItem.setText(item.getName() == null ? "" : item.getName());
+    expand(treeItem);
+
+    if (!item.isEnabled())
+    {
+      treeItem.setGrayed(true);
+      treeItem.setForeground(Color.COMMENT.getSWTColor());
+    }
+
+    this.itemLookup.put(item.getID(),treeItem);
+    this.filter.itemInitialized(item.getID());
   }
 
   /**
@@ -889,7 +999,7 @@ public class Navigation implements Part
       }
     }
   }
-  
+
   /**
    * Kapselt das Navi-Element zusammen mit dem Plugin.
    */
