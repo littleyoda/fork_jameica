@@ -80,7 +80,7 @@ final class NavigationTreeFilter
       restoreVisible(hiddenIds);
       hideSelected(hiddenIds);
       hideEmptyFolders();
-      Tree tree = this.navigation.mainTree;
+      Tree tree = this.navigation.getTree();
       if (tree != null && !tree.isDisposed())
         tree.redraw();
     }
@@ -118,7 +118,7 @@ final class NavigationTreeFilter
   List<Entry> getEntries()
   {
     Map<String,Entry> entries = new LinkedHashMap<String,Entry>();
-    Tree tree = this.navigation.mainTree;
+    Tree tree = this.navigation.getTree();
     if (tree != null && !tree.isDisposed())
     {
       for (TreeItem item:tree.getItems())
@@ -233,7 +233,7 @@ final class NavigationTreeFilter
     if (node == null)
       return false;
 
-    TreeItem existing = this.navigation.itemLookup.get(id);
+    TreeItem existing = this.navigation.getItemLookup().get(id);
     if (existing != null && !existing.isDisposed())
     {
       this.hiddenNodes.remove(id);
@@ -244,7 +244,7 @@ final class NavigationTreeFilter
     if (node.parentId != null && this.hiddenNodes.containsKey(node.parentId))
       restoreNode(node.parentId);
 
-    TreeItem parent = node.parentId == null ? null : this.navigation.itemLookup.get(node.parentId);
+    TreeItem parent = node.parentId == null ? null : this.navigation.getItemLookup().get(node.parentId);
     if (parent == null || parent.isDisposed())
       return false;
 
@@ -271,7 +271,7 @@ final class NavigationTreeFilter
   {
     for (String id:hiddenIds)
     {
-      TreeItem item = this.navigation.itemLookup.get(id);
+      TreeItem item = this.navigation.getItemLookup().get(id);
       if (item != null && !item.isDisposed() && !isProtected(item))
         hide(item);
     }
@@ -285,7 +285,7 @@ final class NavigationTreeFilter
     do
     {
       changed = false;
-      for (TreeItem item:new ArrayList<TreeItem>(this.navigation.itemLookup.values()))
+      for (TreeItem item:new ArrayList<TreeItem>(this.navigation.getItemLookup().values()))
       {
         if (item == null || item.isDisposed() || isProtected(item))
           continue;
@@ -324,7 +324,7 @@ final class NavigationTreeFilter
 
     NavigationItem navigationItem = this.navigation.getNavigationItem(item);
     if (navigationItem != null)
-      this.navigation.itemLookup.remove(getId(navigationItem));
+      this.navigation.getItemLookup().remove(getId(navigationItem));
   }
 
   private void addVisible(Map<String,Entry> entries, TreeItem item, int depth)

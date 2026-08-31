@@ -64,14 +64,14 @@ public class Navigation implements Part
   private DisposeListener dsl   = new MyDisposeListener();
   private Listener start        = new MyStartListener();
   private Settings settings     = new Settings(Navigation.class);
-  Tree mainTree					= null;
+  private Tree mainTree					= null;
   private NavigationItem contextItem = null;
   private TreeItem contextTreeItem = null;
   
 	// TreeItem, unterhalb dessen die Plugins eingehaengt werden. 
   private TreeItem pluginTree		= null;
   
-  final Map<String,TreeItem> itemLookup  = new HashMap<String,TreeItem>();
+  private final Map<String,TreeItem> itemLookup  = new HashMap<String,TreeItem>();
   
   // Lookup von der ID eines Elements zum Navigation-Item und dem Plugin
   private Map<String,NavigationData> idLookup = new HashMap<>();
@@ -80,6 +80,22 @@ public class Navigation implements Part
 
   // Instanzgebunden, weil TreeItems nur zum Lebenszyklus dieses Navigation-Parts gehoeren.
   final NavigationTreeFilter filter = new NavigationTreeFilter(this);
+
+  /**
+   * @return der Navigationsbaum.
+   */
+  Tree getTree()
+  {
+    return this.mainTree;
+  }
+
+  /**
+   * @return Zuordnung der technischen IDs zu den sichtbaren Baumeintraegen.
+   */
+  Map<String,TreeItem> getItemLookup()
+  {
+    return this.itemLookup;
+  }
   
   /**
    * @see de.willuhn.jameica.gui.Part#paint(org.eclipse.swt.widgets.Composite)

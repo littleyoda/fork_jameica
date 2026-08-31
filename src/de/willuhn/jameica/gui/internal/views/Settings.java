@@ -133,7 +133,7 @@ public class Settings extends AbstractView implements Extendable
     lnfGroup.addInput(control.getMinimizeToSystray());
 
     lnfGroup.addHeadline(i18n.tr("Navigation"));
-    lnfGroup.addCheckbox(control.getNavigationVisible(),i18n.tr("Navigation ein- und ausblenden"));
+    lnfGroup.addCheckbox(control.getNavigationVisible(),i18n.tr("Navigation anzeigen"));
     ButtonArea navigationButtons = new ButtonArea();
     navigationButtons.setAlignment(GridData.HORIZONTAL_ALIGN_BEGINNING);
     navigationButtons.addButton(i18n.tr("Navigation anpassen..."),new NavigationTreeSettingsAction(),null,false,"document-properties.png");
