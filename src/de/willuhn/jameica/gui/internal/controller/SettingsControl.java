@@ -34,6 +34,7 @@ import de.willuhn.jameica.gui.internal.parts.CertificateList;
 import de.willuhn.jameica.gui.internal.parts.IconBarSettingsPart;
 import de.willuhn.jameica.gui.internal.parts.PluginDetailPart.Type;
 import de.willuhn.jameica.gui.internal.parts.PluginListPart;
+import de.willuhn.jameica.gui.parts.Button;
 import de.willuhn.jameica.gui.parts.TablePart;
 import de.willuhn.jameica.gui.util.Color;
 import de.willuhn.jameica.messaging.PluginCacheMessageConsumer;
@@ -83,6 +84,7 @@ public class SettingsControl extends AbstractControl
   private CheckboxInput systray;
   private CheckboxInput minimizeToSystray;
   private CheckboxInput navigationVisible;
+  private Button navigationConfig;
   private IconBarSettingsPart iconBarSettings;
 	
   /**
@@ -417,7 +419,30 @@ public class SettingsControl extends AbstractControl
       return this.navigationVisible;
     boolean visible = !Customizing.SETTINGS.getBoolean("application.hidenavigation",false);
     this.navigationVisible = new CheckboxInput(visible);
+    
+    final Listener l = new Listener() {
+      @Override
+      public void handleEvent(Event event)
+      {
+        getNavigationConfig().setEnabled(((Boolean)navigationVisible.getValue()).booleanValue());
+      }
+    };
+    l.handleEvent(null);
+    this.navigationVisible.addListener(l);
     return this.navigationVisible;
+  }
+  
+  /**
+   * Liefert den Config-Button für die Navigation.
+   * @return der Config-Button.
+   */
+  public Button getNavigationConfig()
+  {
+    if (this.navigationConfig != null)
+      return this.navigationConfig;
+    
+    this.navigationConfig = new Button(i18n.tr("Navigation anpassen..."),new NavigationTreeSettingsAction(),null,false,"document-properties.png");
+    return this.navigationConfig;
   }
 
   /**

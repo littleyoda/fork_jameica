@@ -20,7 +20,6 @@ import org.eclipse.swt.widgets.TabItem;
 import de.willuhn.jameica.gui.AbstractView;
 import de.willuhn.jameica.gui.Action;
 import de.willuhn.jameica.gui.GUI;
-import de.willuhn.jameica.gui.NavigationTreeSettingsAction;
 import de.willuhn.jameica.gui.extension.Extendable;
 import de.willuhn.jameica.gui.internal.action.CertificateImport;
 import de.willuhn.jameica.gui.internal.action.SystemCertificates;
@@ -133,11 +132,10 @@ public class Settings extends AbstractView implements Extendable
     lnfGroup.addInput(control.getMinimizeToSystray());
 
     lnfGroup.addHeadline(i18n.tr("Navigation"));
+    
     lnfGroup.addCheckbox(control.getNavigationVisible(),i18n.tr("Navigation anzeigen"));
-    ButtonArea navigationButtons = new ButtonArea();
-    navigationButtons.setAlignment(GridData.HORIZONTAL_ALIGN_BEGINNING);
-    navigationButtons.addButton(i18n.tr("Navigation anpassen..."),new NavigationTreeSettingsAction(),null,false,"document-properties.png");
-    lnfGroup.addButtonArea(navigationButtons);
+    final SimpleContainer c = new SimpleContainer(lnfGroup.getComposite(),false,1);
+    control.getNavigationConfig().paint(c.getComposite());
 
     lnfGroup.addHeadline(i18n.tr("Symbolleiste"));
     lnfGroup.addPart(control.getIconBarSettings());
